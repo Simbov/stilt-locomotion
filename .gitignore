@@ -1,0 +1,37 @@
+# Virtual environment
+.venv/
+
+# mjlab reference clone (dependency, not your code)
+mjlab/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Checkpoints and training artifacts
+runs/
+logs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Weights & Biases
+wandb/
