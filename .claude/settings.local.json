@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m venv .venv)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install mjlab)",
+      "Bash(git clone https://github.com/mujocolab/mjlab.git)",
+      "Bash(pip show mjlab)",
+      "Bash(git init)",
+      "Bash(git add pyproject.toml requirements.txt .gitignore)",
+      "Bash(git commit -m \"Initial project scaffold:*)",
+      "Bash(chmod +x scripts/train.sh scripts/sync_checkpoints.sh scripts/setup_remote.sh)",
+      "Bash(git add .)",
+      "Bash(git commit -m \"Add project scaffold: envs, configs, assets, scripts:*)"
+    ]
+  }
+}
