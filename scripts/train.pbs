@@ -22,6 +22,8 @@ else
 fi
 
 # ── Training ───────────────────────────────────────────────────────────────
+# PBS sets CUDA_VISIBLE_DEVICES to a UUID; mjlab expects an integer index.
+export CUDA_VISIBLE_DEVICES=0
 .venv/bin/train Mjlab-Velocity-Flat-Unitree-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 30000 \
