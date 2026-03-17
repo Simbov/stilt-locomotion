@@ -20,4 +20,6 @@ train Mjlab-Velocity-Flat-Unitree-G1 \
     --agent.max-iterations 30000 \
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
+    --agent.upload-model False \
+    --agent.save-interval 500 \
     --gpu-ids 0
