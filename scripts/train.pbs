@@ -15,7 +15,7 @@ pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
-train Mjlab-Velocity-Flat-Unitree-G1 \
+.venv/bin/train Mjlab-Velocity-Flat-Unitree-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 30000 \
     --agent.logger wandb \
