@@ -8,11 +8,16 @@
 
 cd $PBS_O_WORKDIR
 
+# ── Load Python 3.12 module ────────────────────────────────────────────────
+module load GCCcore/13.3.0
+module load Python/3.12.3
+module load libffi/3.4.5
+
 # ── Environment setup ──────────────────────────────────────────────────────
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip --quiet
-pip install -r requirements.txt --quiet
+python -m pip install --upgrade pip --quiet
+python -m pip install -r requirements.txt --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
 .venv/bin/train Mjlab-Velocity-Flat-Unitree-G1 \
