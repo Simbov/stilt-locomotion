@@ -11,7 +11,8 @@ cd $PBS_O_WORKDIR
 # ── Environment setup (Miniconda Python 3.12 — no modules needed) ──────────
 # Miniconda lives in ~/miniconda3 (installed once on the login node).
 # We build the venv on first run; subsequent jobs reuse it from the shared FS.
-if [ ! -d ".venv" ]; then
+if [ ! -f ".venv/bin/train" ]; then
+    rm -rf .venv
     ~/miniconda3/bin/python3 -m venv .venv
     source .venv/bin/activate
     python -m pip install --upgrade pip --quiet
