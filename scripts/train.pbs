@@ -28,5 +28,4 @@ fi
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
     --agent.upload-model False \
-    --agent.save-interval 500 \
-    --gpu-ids 0
+    --agent.save-interval 500
