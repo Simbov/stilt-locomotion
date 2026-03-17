@@ -1,0 +1,18 @@
+#!/bin/bash -l
+#PBS -N stilt-train
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=48:00:00
+#PBS -m abe
+#PBS -M your.email@qut.edu.au
+#PBS -j oe
+
+cd $PBS_O_WORKDIR
+
+source .venv/bin/activate
+
+train Mjlab-Velocity-Flat-Unitree-G1 \
+    --env.scene.num-envs 4096 \
+    --agent.max-iterations 30000 \
+    --agent.logger wandb \
+    --agent.wandb-project stilt-locomotion \
+    --gpu-ids 0
