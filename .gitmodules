@@ -1,0 +1,4 @@
+[submodule "mjlab"]
+	path = mjlab
+	url = https://github.com/mujocolab/mjlab.git
+	branch = main

@@ -1,9 +1,6 @@
 # Virtual environment
 .venv/
 
-# mjlab reference clone (dependency, not your code)
-mjlab/
-
 # Python
 __pycache__/
 *.py[cod]
