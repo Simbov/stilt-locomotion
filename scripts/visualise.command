@@ -1,0 +1,61 @@
+#!/bin/bash
+# Double-click this file in Finder to open the checkpoint picker.
+# It will ask which .pt checkpoint to visualise, then open the viewer in your browser.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LOGS_DIR="$SCRIPT_DIR/logs/rsl_rl/g1_velocity"
+
+# ── Pick a checkpoint via native macOS file dialog ────────────────────────────
+CHECKPOINT=$(osascript <<APPLESCRIPT
+try
+    set logsFolder to POSIX file "$LOGS_DIR" as alias
+    set theFile to choose file ¬
+        with prompt "Select a model checkpoint to visualise:" ¬
+        default location logsFolder
+    return POSIX path of theFile
+on error
+    return ""
+end try
+APPLESCRIPT
+)
+
+if [ -z "$CHECKPOINT" ]; then
+    osascript -e 'display dialog "No checkpoint selected — exiting." buttons {"OK"} default button "OK" with icon caution'
+    exit 0
+fi
+
+CHECKPOINT_NAME=$(basename "$CHECKPOINT")
+echo "▶  Loading: $CHECKPOINT"
+
+# ── Kill any existing viewer ──────────────────────────────────────────────────
+lsof -ti:8080 | xargs kill -9 2>/dev/null
+sleep 1
+
+# ── Launch viewer ─────────────────────────────────────────────────────────────
+source "$SCRIPT_DIR/.venv/bin/activate"
+
+play Mjlab-Velocity-Flat-Unitree-G1 \
+    --agent trained \
+    --checkpoint-file "$CHECKPOINT" \
+    --num-envs 4 \
+    --viewer viser &
+
+VIEWER_PID=$!
+echo "   Viewer PID: $VIEWER_PID"
+echo "   Waiting for viewer to start..."
+
+# ── Wait until port 8080 is ready, then open browser ─────────────────────────
+for i in {1..30}; do
+    sleep 1
+    if curl -s http://localhost:8080 > /dev/null 2>&1; then
+        echo "   Ready! Opening browser..."
+        open http://localhost:8080
+        osascript -e "display notification \"Viewing: $CHECKPOINT_NAME\" with title \"mjlab Visualiser\" sound name \"Ping\""
+        break
+    fi
+done
+
+# Keep terminal open so viewer keeps running
+echo ""
+echo "   Press Ctrl+C to stop the viewer."
+wait $VIEWER_PID
