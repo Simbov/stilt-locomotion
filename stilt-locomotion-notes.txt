@@ -1,0 +1,612 @@
+================================================================================
+STILT LOCOMOTION PROJECT - SETUP & PROGRESS NOTES
+Unitree G1 Research Edition | Honours Thesis
+================================================================================
+Last updated: March 2026
+
+
+--------------------------------------------------------------------------------
+PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+Goal: Train the Unitree G1 humanoid robot to walk on length-varying stilts with
+a custom foot on the end, then transfer to the physical robot.
+
+Roles:
+- Simon: simulation and RL training
+- Partner: mechanical design of the stilts
+
+Thesis novelty: No existing paper directly addresses humanoid stilt-walking.
+Prior work randomises leg length as a simulation parameter for generalisation,
+but none has physically extended a humanoid's legs with rigid stilts. This
+introduces distinct contact dynamics, point-contact stability, and swing
+clearance challenges.
+
+Key theoretical grounding: Linear Inverted Pendulum Model (omega = sqrt(g/h))
+predicts that stilts slow the natural gait frequency.
+
+
+--------------------------------------------------------------------------------
+HARDWARE
+--------------------------------------------------------------------------------
+Robot: Unitree G1 Research Edition
+Local machine: MacBook Pro M4 (no NVIDIA GPU - CPU only for local dev)
+Remote training: Cloud GPU (RunPod or Vast.ai) via VS Code Remote SSH
+
+
+--------------------------------------------------------------------------------
+SOFTWARE STACK
+--------------------------------------------------------------------------------
+Simulator:      MuJoCo (local, CPU) + MuJoCo Warp (GPU, cloud)
+Framework:      mjlab v1.2.0
+RL algorithm:   PPO via rsl-rl-lib v5.0.1
+Tracking:       Weights & Biases (wandb)
+Python:         3.12
+Package manager: uv / pip
+
+
+--------------------------------------------------------------------------------
+WHAT IS MJLAB
+--------------------------------------------------------------------------------
+mjlab combines Isaac Lab's manager-based API with MuJoCo Warp (GPU-accelerated
+MuJoCo). It is NOT the same as MJX.
+
+- MuJoCo: the physics engine (CPU, single env, local dev/visualisation)
+- MJX: JAX-based GPU version of MuJoCo (separate project by Google DeepMind)
+- MuJoCo Warp: NVIDIA Warp-based GPU version of MuJoCo (used by mjlab)
+- MuJoCo Playground: pre-built RL environments using MJX (separate project)
+- mjlab: Isaac Lab API + MuJoCo Warp (what this project uses)
+- Isaac Lab: NVIDIA's equivalent framework using PhysX (requires full Isaac Sim)
+
+mjlab repo: https://github.com/mujocolab/mjlab
+macOS: supported for evaluation and visualisation only, NOT GPU training
+
+
+--------------------------------------------------------------------------------
+LOCAL SETUP (MacBook M4)
+--------------------------------------------------------------------------------
+1. Install uv:
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+2. Agree to Xcode license (required for git to work):
+   sudo xcodebuild -license
+   (scroll with space, type 'agree' at the end)
+
+3. Run demo without installing (just to test):
+   uvx --from mjlab --refresh demo
+   Then open http://localhost:8080 in browser (viser viewer)
+
+4. Project folder setup:
+   mkdir stilt-locomotion && cd stilt-locomotion
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install mjlab
+
+5. Or install from source (editable, recommended for modifying code):
+   git clone https://github.com/mujocolab/mjlab.git
+   cd mjlab
+   pip install -e .
+
+6. Verify install:
+   python -c "import mjlab; print('ok')"
+
+
+--------------------------------------------------------------------------------
+PROJECT FOLDER STRUCTURE
+--------------------------------------------------------------------------------
+stilt-locomotion/
+├── .venv/              # virtual environment
+├── .git/               # git repo
+├── .gitignore
+├── mjlab/              # mjlab source code (cloned for reference)
+├── assets/             # MJCF stilt models go here
+├── configs/            # training configs go here
+├── envs/               # custom environment code goes here
+├── scripts/            # training and evaluation scripts
+├── pyproject.toml      # project dependencies
+└── requirements.txt    # pinned dependencies
+
+pyproject.toml specifies: mjlab>=1.2.0, requires-python>=3.10
+
+
+--------------------------------------------------------------------------------
+KEY FILES IN MJLAB SOURCE
+--------------------------------------------------------------------------------
+G1 task configs:
+  mjlab/src/mjlab/tasks/velocity/config/g1/env_cfgs.py   ← MOST IMPORTANT
+  mjlab/src/mjlab/tasks/velocity/config/g1/rl_cfg.py
+  mjlab/src/mjlab/tasks/velocity/config/g1/__init__.py
+
+Base velocity env (reward functions, observations, terminations):
+  mjlab/src/mjlab/tasks/velocity/velocity_env_cfg.py
+
+G1 robot definition:
+  mjlab/src/mjlab/asset_zoo/robots/unitree_g1/g1_constants.py
+  mjlab/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml
+
+
+--------------------------------------------------------------------------------
+RUNNING THE G1 DEMO LOCALLY
+--------------------------------------------------------------------------------
+# Full demo with pretrained policy in viser browser viewer:
+uvx --from mjlab --refresh demo
+# Open http://localhost:8080
+
+# Sanity check agents (no training needed):
+uv run play Mjlab-Velocity-Flat-Unitree-G1 --agent zero
+uv run play Mjlab-Velocity-Flat-Unitree-G1 --agent random
+
+# View G1 MJCF in MuJoCo viewer (gravity disabled so robot doesn't fall):
+python -c "
+import mujoco
+import mujoco.viewer
+m = mujoco.MjModel.from_xml_path('mjlab/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml')
+m.opt.gravity[2] = 0
+d = mujoco.MjData(m)
+mujoco.viewer.launch(m, d)
+"
+# Controls: left click drag = rotate, right click drag = pan, scroll = zoom
+# Double click a body to re-centre camera
+
+
+--------------------------------------------------------------------------------
+G1 ROBOT STRUCTURE (from MJCF)
+--------------------------------------------------------------------------------
+Base spawn height: 0.793m (pelvis), effective standing height ~0.783675m
+
+Leg hierarchy (left side, right is mirrored):
+  pelvis
+  └── left_hip_pitch_link      (joint: left_hip_pitch_joint, axis Y)
+      └── left_hip_roll_link   (joint: left_hip_roll_joint, axis X)
+          └── left_hip_yaw_link (joint: left_hip_yaw_joint, axis Z)
+              └── left_knee_link (joint: left_knee_joint, axis Y)
+                  └── left_ankle_pitch_link (joint: left_ankle_pitch_joint)
+                      └── left_ankle_roll_link  ← STILT ATTACHES HERE
+                          ├── site "left_foot" pos="0.04 0 -0.037"
+                          └── foot1-7_collision geoms (capsules at z=-0.025)
+
+Foot geoms: 7 capsules per foot (foot_capsule class, size=0.01)
+  - Span roughly from x=-0.054 to x=0.132, y=-0.026 to y=0.026, z=-0.025
+  - These get DISABLED/REMOVED when adding stilts
+
+Foot site: used by reward functions for height/clearance tracking
+  left_foot:  pos="0.04 0 -0.037" (relative to left_ankle_roll_link)
+  right_foot: pos="0.04 0 -0.037" (relative to right_ankle_roll_link)
+
+
+--------------------------------------------------------------------------------
+ACTUATORS (from g1_constants.py)
+--------------------------------------------------------------------------------
+Motor types:
+  5020:    shoulders, elbows, wrists           | effort=25Nm,  vel=37rad/s
+  7520-14: hip pitch, hip yaw, waist yaw       | effort=88Nm,  vel=32rad/s
+  7520-22: hip roll, knee                      | effort=139Nm, vel=20rad/s
+  4010:    wrist pitch/yaw                     | effort=5Nm,   vel=22rad/s
+  ANKLE:   ankle pitch/roll (2x 5020 parallel) | effort=50Nm  ← KEY FOR STILTS
+  WAIST:   waist pitch/roll (2x 5020 parallel) | effort=50Nm
+
+Action scale formula: 0.25 * effort_limit / stiffness (per actuator)
+
+NOTE: Ankle torque budget (50Nm) may become a limiting factor at longer
+stilt lengths. Worth analysing in thesis.
+
+Home keyframe: pos=(0, 0, 0.783675)
+  hip_pitch: -0.1 rad, knee: 0.3 rad, ankle_pitch: -0.2 rad
+  (spawn height must increase by stilt length when using stilts)
+
+
+--------------------------------------------------------------------------------
+ENVIRONMENT STRUCTURE (velocity_env_cfg.py)
+--------------------------------------------------------------------------------
+OBSERVATIONS (actor):
+  - base_lin_vel (IMU, noise +-0.5)
+  - base_ang_vel (IMU, noise +-0.2)
+  - projected_gravity (noise +-0.05)
+  - joint_pos (relative, noise +-0.01)
+  - joint_vel (relative, noise +-1.5)
+  - last_action
+  - velocity command
+  - height_scan (raycasts, flat terrain version removes this)
+
+OBSERVATIONS (critic, additional):
+  - foot_height
+  - foot_air_time
+  - foot_contact
+  - foot_contact_forces
+
+REWARDS:
+  track_linear_velocity:   weight=+2.0  (main task reward)
+  track_angular_velocity:  weight=+2.0  (main task reward)
+  upright:                 weight=+1.0  (torso orientation)
+  pose:                    weight=+1.0  (joint deviation from reference)
+  dof_pos_limits:          weight=-1.0  (joint limit penalty)
+  action_rate_l2:          weight=-0.1  (smooth actions)
+  foot_clearance:          weight=-2.0  (target 0.1m clearance)  ← MODIFY FOR STILTS
+  foot_swing_height:       weight=-0.25 (target 0.1m swing)      ← MODIFY FOR STILTS
+  foot_slip:               weight=-0.1                            ← MODIFY FOR STILTS
+  soft_landing:            weight=-1e-5                           ← INCREASE FOR STILTS
+  self_collisions:         weight=-1.0  (added in G1 config)
+  body_ang_vel:            weight=-0.05 (G1 specific)
+  angular_momentum:        weight=-0.02 (G1 specific)
+
+TERMINATIONS:
+  time_out:   episode length exceeded
+  fell_over:  torso tilt > 70 degrees  ← CONSIDER TIGHTENING FOR STILTS
+
+DOMAIN RANDOMISATION (events):
+  foot_friction:   randomise foot geom friction (0.3 to 1.2) at startup
+  encoder_bias:    joint encoder bias (+-0.015 rad) at startup
+  base_com:        centre of mass offset (+-0.025m x/y, +-0.03m z) at startup
+  push_robot:      random velocity pushes every 1-3 seconds during episode
+  reset_base:      random spawn position/yaw on reset
+
+CURRICULUM:
+  terrain_levels: progressive terrain difficulty
+  command_vel:    progressive velocity targets
+    step 0:       lin_vel_x=(-1, 1), ang_vel_z=(-0.5, 0.5)
+    step 120000:  lin_vel_x=(-1.5, 2), ang_vel_z=(-0.7, 0.7)
+    step 240000:  lin_vel_x=(-2, 3)
+
+Simulation:
+  timestep: 0.005s (200Hz physics)
+  decimation: 4 (50Hz policy)
+  episode_length: 20s
+
+
+--------------------------------------------------------------------------------
+WHAT TO MODIFY FOR STILTS (env_cfgs.py)
+--------------------------------------------------------------------------------
+1. site_names: point to stilt tip sites instead of original foot sites
+   site_names = ("left_stilt_tip", "right_stilt_tip")
+
+2. geom_names: point to stilt tip geoms for friction randomisation
+   geom_names = ("left_stilt_tip_collision", "right_stilt_tip_collision")
+
+3. feet_ground_cfg contact sensor: update body pattern to track stilt tip
+   currently: pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$"
+   change to: match the stilt tip body
+
+4. foot_clearance target_height: increase from 0.1m (stilt needs more swing)
+
+5. foot_swing_height target_height: increase from 0.1m
+
+6. pose reward std values: retune for higher COM and altered natural pose
+
+7. HOME_KEYFRAME pos z: increase by stilt length
+   e.g. 0.3m stilts -> pos=(0, 0, 0.783675 + 0.3) = (0, 0, 1.083675)
+
+8. termination fell_over limit_angle: consider tightening from 70 degrees
+
+9. Add stilt_length domain randomisation event for curriculum
+
+
+--------------------------------------------------------------------------------
+HOW TO ADD STILTS IN MJCF (template)
+--------------------------------------------------------------------------------
+Inside left_ankle_roll_link, REMOVE foot1-7 collision geoms and ADD:
+
+<body name="left_stilt" pos="0 0 -0.025">
+  <inertial pos="0 0 -0.15" mass="0.5" diaginertia="0.001 0.001 0.0001"/>
+  <geom name="left_stilt_shaft" type="cylinder"
+        size="0.015 0.15" pos="0 0 -0.15"
+        class="collision"/>
+  <geom name="left_stilt_tip_collision" type="sphere"
+        size="0.02" pos="0 0 -0.30"
+        class="foot_capsule"/>
+  <site name="left_stilt_tip" pos="0 0 -0.30"/>
+</body>
+
+(Mirror for right side. Adjust pos z values for different stilt lengths.)
+
+NEED FROM PARTNER before finalising MJCF:
+  - Stilt length range for curriculum (e.g. 0.1m to 0.5m)
+  - Tip geometry shape (hemisphere, flat rubber pad, spike etc.)
+  - Approximate stilt mass and dimensions
+
+
+--------------------------------------------------------------------------------
+QUT AQUA HPC TRAINING WORKFLOW
+--------------------------------------------------------------------------------
+Aqua is QUT's GPU supercomputer. Access via PBS job scheduler.
+
+LOGIN:
+  ssh n11298111@aquarius02.hpc.qut.edu.au
+  cd ~/stilt-locomotion
+  (HTTPS clone only — SSH port 22 is blocked: git clone https://github.com/...)
+
+PYTHON SETUP ON AQUA:
+  IMPORTANT: Do NOT use "module load Python" — it silently fails on GPU compute nodes.
+  Instead, Miniconda is installed at ~/miniconda3 (Python 3.13, persistent in home dir).
+  The PBS script uses ~/miniconda3/bin/python3 directly to build the venv.
+  Home directory /mnt/hpccs01/home/n11298111/ is shared across all nodes — files
+  persist after jobs finish, nothing is deleted when a job ends.
+
+SUBMIT A TRAINING JOB:
+  git pull                        # get latest scripts
+  qsub scripts/train.pbs          # submit
+  qstat -u $USER                  # check status (Q=queued, R=running)
+  cat stilt-train.o<JOBID>        # view output/error log
+
+KEY FIXES IN train.pbs (hard-won, do not remove):
+  - Uses ~/miniconda3/bin/python3 (not module load)
+  - Checks for .venv/bin/train not just .venv/ (handles partial installs)
+  - export CUDA_VISIBLE_DEVICES=0 (PBS sets UUID format, mjlab needs integer)
+  - No --gpu-ids argument (default [0] is correct; bare integer fails to parse)
+
+COPY LOGS FROM AQUA TO MAC (run on Mac):
+  rsync -avz --progress \
+    n11298111@aquarius02.hpc.qut.edu.au:~/stilt-locomotion/logs/ \
+    ~/Desktop/stilt-locomotion/logs/
+
+W&B ON AQUA:
+  wandb login was done once on the login node (~/.netrc persists in home dir).
+  Compute nodes have internet access — W&B syncs live during training.
+  Monitor at: https://wandb.ai/simbov04-qut/stilt-locomotion
+
+TRAINING SPEED (H100, 4096 envs):
+  ~99,000 simulation frames/second
+  ~1 second per iteration (collection + learning)
+  30,000 iterations ≈ ~8-9 hours (current walltime limit is 6hrs — need 2 jobs)
+
+CLOUD GPU (alternative, not yet used):
+  Vast.ai / RunPod are pay-per-hour alternatives if Aqua queue is long.
+  A100 80GB: ~$0.67-0.79/hr, H100 80GB: ~$1.50-1.87/hr
+
+
+--------------------------------------------------------------------------------
+TRAINING COMMAND (baseline)
+--------------------------------------------------------------------------------
+Local Mac (test, 200 iters, CPU):
+  bash scripts/train.sh
+
+Aqua HPC (full run, 30k iters, H100):
+  qsub scripts/train.pbs
+
+View a checkpoint locally (viser browser viewer):
+  play Mjlab-Velocity-Flat-Unitree-G1 \
+    --agent trained \
+    --checkpoint-file logs/rsl_rl/g1_velocity/<run>/<model>.pt \
+    --num-envs 4 --viewer viser
+  # Or double-click scripts/visualise.command in Finder
+
+Kill viewer:
+  lsof -ti:8080 | xargs kill -9
+
+
+--------------------------------------------------------------------------------
+PLANNED TRAINING PHASES
+--------------------------------------------------------------------------------
+Phase 1: Baseline G1 flat terrain walking (no stilts)
+  - Confirm pipeline works end to end
+  - Establish baseline gait metrics
+
+Phase 2: Short stilts (e.g. 0.1m)
+  - Introduce stilt MJCF with modified foot collision
+  - Increase foot_clearance and swing_height targets
+  - Adjust spawn height keyframe
+
+Phase 3: Progressive stilt curriculum
+  - Increase stilt length incrementally
+  - Tune pose reward std values per length
+  - Add stilt_length domain randomisation
+
+Phase 4: Rough terrain (optional if time permits)
+  - Enable terrain curriculum
+  - Re-enable height scan observations
+
+Phase 5: Sim-to-real transfer
+  - Export policy as ONNX (mjlab supports native ONNX export via rsl-rl-lib)
+  - Deploy on physical G1
+
+
+--------------------------------------------------------------------------------
+USEFUL COMMANDS REFERENCE
+--------------------------------------------------------------------------------
+Activate venv:
+  source .venv/bin/activate
+
+Check mjlab installed:
+  python -c "import mjlab; print('ok')"
+
+Run demo:
+  uvx --from mjlab --refresh demo
+
+View G1 in MuJoCo viewer (gravity off):
+  python -c "
+  import mujoco, mujoco.viewer
+  m = mujoco.MjModel.from_xml_path('mjlab/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml')
+  m.opt.gravity[2] = 0
+  d = mujoco.MjData(m)
+  mujoco.viewer.launch(m, d)
+  "
+
+Sanity check environment (no training):
+  uv run play Mjlab-Velocity-Flat-Unitree-G1 --agent zero
+  uv run play Mjlab-Velocity-Flat-Unitree-G1 --agent random
+
+Update dependencies file:
+  pip freeze > requirements.txt
+
+Export scene for inspection:
+  uv run export-scene Mjlab-Velocity-Flat-Unitree-G1
+
+
+--------------------------------------------------------------------------------
+KEY LITERATURE
+--------------------------------------------------------------------------------
+Foundational locomotion RL:
+  Radosavovic 2024 - humanoid locomotion with transformers
+  Rudin 2022 - learning to walk in minutes (legged_gym)
+  Miki 2022 - learning robust perceptive locomotion
+
+G1 specific:
+  arXiv:2505.20619 - Unitree G1 locomotion
+  unitree_rl_gym - official Unitree RL environments
+  ASAP/CMU - G1 sim-to-real work
+
+Morphology randomisation (adjacent, not identical to this project):
+  GenLoco, McARL, TumblerNet 2025
+
+Exoskeleton/stilt adjacent:
+  Nature Exoskeleton 2024
+  LLRE Deep RL 2023
+  CoP Exoskeleton RL
+
+Multi-embodiment:
+  Multi-Loco 2025
+
+MuJoCo Playground (G1 environment with confirmed sim-to-real):
+  arxiv 2502.08844
+
+
+--------------------------------------------------------------------------------
+SCRIPTS CREATED (scripts/)
+--------------------------------------------------------------------------------
+train.sh          - local Mac test run (64 envs, 200 iters, CPU, tensorboard)
+train.pbs         - Aqua HPC job (4096 envs, 30k iters, H100, wandb)
+visualise.command - double-click in Finder → file picker → opens viser in browser
+watch_training.sh - auto-reloads viser viewer as new checkpoints appear (local only)
+
+
+--------------------------------------------------------------------------------
+COMPLETED TRAINING RUNS
+--------------------------------------------------------------------------------
+Run 1+2 — Mac baseline (2026-03-17):
+  Log: logs/rsl_rl/g1_velocity/2026-03-17_13-09-16/ and _13-24-35/
+  798 iterations, 64 envs, CPU. Mean reward -5.5 → -0.37. Just a sanity check.
+
+Run 3 — Aqua H100 (2026-03-17, job 18823913):
+  Log: logs/rsl_rl/g1_velocity/2026-03-17_20-39-19/
+  4096 envs, H100 GPU, W&B logger.
+  Ran to ~21,500 iterations (hit 6hr wall time, stopped before 30k).
+  Latest checkpoint: model_21500.pt
+
+  Key results at end of run:
+    mean_reward:          -1.27 → ~54     (peaked ~68 before 2nd curriculum step)
+    mean_episode_length:  13    → 995     (robots running full episode)
+    fell_over rate:       0%              (zero falls by ~iter 2800)
+    total_fps:            99,000 frames/sec on H100
+
+  Curriculum events observed:
+    iter 5,000:  velocity stepped up (-1.5→+2.0 m/s). Reward dipped 68→51, recovered.
+    iter 10,000: velocity stepped up again (-2.0→+3.0 m/s). Another dip expected.
+
+  TO CONTINUE THIS RUN: submit another train.pbs job — check if mjlab supports
+  a --resume or --checkpoint flag to continue from model_21500.pt.
+  Better: increase #PBS -l walltime to 12:00:00 if queue allows.
+
+
+--------------------------------------------------------------------------------
+CURRICULUM — EXACT NUMBERS (from velocity_env_cfg.py)
+--------------------------------------------------------------------------------
+Time-based, always fires at these exact iterations (step * 24 converts gradient
+steps to iterations because there are 24 mini-batches per iteration):
+
+  Iter 0:      forward ±1.0 m/s,   turning ±0.5 rad/s
+  Iter 5,000:  forward -1.5→+2.0,  turning ±0.7 rad/s   ← OBSERVED in Run 3
+  Iter 10,000: forward -2.0→+3.0,  turning ±0.7 rad/s   ← hit in Run 3
+  (no more stages after 10k — trains at 3 m/s max for remaining iterations)
+
+Sideways speed (lin_vel_y) stays ±1.0 m/s throughout.
+10% of environments always get zero velocity command (standing practice).
+Velocity commands resampled every 3–8 seconds within each episode.
+
+
+--------------------------------------------------------------------------------
+POSE REWARD JOINT STDs (G1 specific, from g1/env_cfgs.py)
+--------------------------------------------------------------------------------
+Controls how strictly joints must stay near their default pose.
+Lower std = tighter = bigger penalty for deviation.
+
+  Joint             Standing  Walking  Running
+  hip_pitch         0.05      0.30     0.50   ← most freedom for leg stride
+  knee              0.05      0.35     0.60   ← most freedom for leg stride
+  ankle_pitch       0.05      0.25     0.35
+  hip_roll/yaw      0.05      0.15     0.20   ← tight, prevents lateral sway
+  ankle_roll        0.05      0.10     0.15   ← very tight, critical for balance
+  waist_roll        0.05      0.08     0.08   ← always very tight
+  waist_pitch       0.05      0.10     0.20
+  shoulder_pitch    0.05      0.15     0.50   ← arm swing allowed at speed
+  wrist             0.05      0.30     0.30   ← loose, doesn't affect balance
+
+  Thresholds: standing <0.05 m/s, walking 0.05–1.5 m/s, running >1.5 m/s
+
+
+--------------------------------------------------------------------------------
+SIM-TO-REAL TRANSFER ROADMAP
+--------------------------------------------------------------------------------
+Stage 1: MJCF model of stilt robot
+  - Build MJCF (MuJoCo XML) of the physical stilt hardware
+  - Add to assets/mjcf/
+  - Needs: body links, joints with limits, actuators, foot contact geoms/sites, IMU frame
+  - Get from partner: stilt length range, tip geometry, mass, dimensions
+  - Test loads: python -c "import mujoco; mujoco.MjModel.from_xml_path('assets/mjcf/stilt.xml')"
+
+Stage 2: Custom environment config (envs/stilt_env.py)
+  - Base it on g1/env_cfgs.py pattern
+  - Key changes for stilts:
+    foot_clearance target_height: increase from 0.1m (stilts need bigger step height)
+    foot_swing_height target_height: same
+    air_time weight: TURN ON (currently 0 for G1) — stilts need proper stepping rhythm
+    pose stds: retune for stilt joint natural ranges
+    termination angle: consider tightening from 70° (stilts are less stable)
+    contact sensor body pattern: point to stilt tip, not ankle_roll_link
+    site_names: ("left_stilt_tip", "right_stilt_tip")
+    spawn height keyframe: z += stilt_length
+  - Add stilt_length domain randomisation for curriculum
+
+Stage 3: Train in simulation
+  - Start flat terrain, then rough
+  - Watch same W&B metrics (reward, episode_length, fell_over)
+  - Tune reward weights for stilt dynamics
+  - Consider progressive stilt length curriculum (train short stilts first)
+
+Stage 4: Policy export
+  - mjlab auto-exports .onnx at end of run (e.g. 2026-03-17_20-39-19.onnx)
+  - ONNX runs without Python/mjlab on robot's onboard computer
+  - Also .pt checkpoints saved every 500 iterations
+
+Stage 5: Onboard deployment
+  - Hardware needed: onboard computer (e.g. Jetson Orin), joint encoders, IMU
+  - Policy runs at 50Hz (20ms per step = decimation 4 × timestep 5ms)
+  - Policy INPUT (what network receives each step):
+      base_lin_vel (3), base_ang_vel (3), projected_gravity (3)
+      joint_pos (N), joint_vel (N), last_action (N)
+      velocity command (3: vx, vy, yaw)
+  - Policy OUTPUT: target joint positions → PD controllers on each joint
+  - PD controllers run faster (e.g. 1kHz) between policy steps
+  - Run ONNX model via onnxruntime (pip install onnxruntime)
+
+Stage 6: Safety during real-world testing
+  - Start with robot on gantry/harness
+  - Test standing still before walking
+  - Gradually increase commanded velocity
+  - Emergency stop: set velocity command to (0, 0, 0)
+
+
+--------------------------------------------------------------------------------
+NEXT STEPS (as of 2026-03-18)
+--------------------------------------------------------------------------------
+Pipeline complete — baseline G1 training working end to end on Aqua + W&B.
+
+Immediate research tasks:
+  [ ] Coordinate with partner on stilt dimensions, tip geometry, mass
+  [ ] Run baseline G1 training to 30k iters (submit 2nd job to continue from 21500)
+        → check if --resume flag exists: .venv/bin/train --help
+        → OR increase walltime to 12hr in train.pbs and rerun from scratch
+  [ ] Analyse final model_21500.pt gait in detail (compare metrics vs iter 5k/10k)
+
+Once stilt dimensions known:
+  [ ] Create stilt MJCF in assets/mjcf/ (see MJCF template section above)
+  [ ] Create envs/stilt_env.py (copy g1/env_cfgs.py, modify sites/rewards/pose)
+  [ ] Register new env task in mjlab (see __init__.py in g1 config folder)
+  [ ] Run short stilt training run (start 0.1m, verify robot learns to balance)
+  [ ] Iterate on curriculum stilt length (0.1 → 0.2 → 0.3m etc.)
+
+Thesis writing:
+  [ ] Document baseline G1 results (reward curves, gait metrics from W&B)
+  [ ] Compare gait at different curriculum stages (iter 0, 5k, 10k, 21.5k)
+  [ ] Note the LIPM prediction: longer stilts should slow gait frequency (verify)
+
+================================================================================
+END OF NOTES
+================================================================================
