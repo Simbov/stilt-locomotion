@@ -126,6 +126,7 @@
                   <geom name="left_foot6_collision" class="foot_capsule" fromto="-0.044 0.018 -0.025 0.123 0.018 -0.025"/>
                   <geom name="left_foot7_collision" class="foot_capsule" fromto="0.1 0.026 -0.025 0.05 0.026 -0.025"/> -->
                   <body name="left_stilt" pos="0 0 0">
+                    <inertial pos="0.04 0 -0.2" mass="0.5" diaginertia="0.008 0.008 0.001"/>
                     <geom class="visual" material="silver" mesh="stilt"/>
                     <!-- Left block (STL X 0-78mm, body X -0.070 to +0.008) -->
                     <geom name="left_stilt_l1_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.055 -0.035 -0.425  -0.055 0.035 -0.425"/>
@@ -194,6 +195,7 @@
                   <geom name="right_foot6_collision" class="foot_capsule" fromto="-0.044 0.018 -0.025 0.123 0.018 -0.025"/>
                   <geom name="right_foot7_collision" class="foot_capsule" fromto="0.1 0.026 -0.025 0.05 0.026 -0.025"/> -->
                   <body name="right_stilt" pos="0 0 0">
+                    <inertial pos="0.04 0 -0.2" mass="0.5" diaginertia="0.008 0.008 0.001"/>
                     <geom class="visual" material="silver" mesh="stilt"/>
                     <!-- Left block -->
                     <geom name="right_stilt_l1_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.055 -0.035 -0.425  -0.055 0.035 -0.425"/>

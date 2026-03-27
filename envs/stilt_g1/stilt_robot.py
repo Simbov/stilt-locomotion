@@ -29,9 +29,12 @@ def get_stilt_spec() -> mujoco.MjSpec:
   return spec
 
 
-# Spawn height = standard G1 knees-bent height + stilt length (0.435m)
+# Spawn height: stock G1 knees-bent pelvis (0.76m) + extra stilt extension.
+# Stock foot extends 0.035m below ankle_roll_link (capsule at -0.025, radius 0.01).
+# Stilt capsule extends 0.435m below ankle_roll_link.
+# Extra height needed = 0.435 - 0.035 = 0.400m → spawn at 0.76 + 0.40 = 1.16m.
 STILT_G1_KEYFRAME = EntityCfg.InitialStateCfg(
-  pos=(0, 0, 1.195),
+  pos=(0, 0, 1.16),
   joint_pos={
     ".*_hip_pitch_joint": -0.312,
     ".*_knee_joint": 0.669,
