@@ -48,16 +48,13 @@ STILT_G1_KEYFRAME = EntityCfg.InitialStateCfg(
   joint_vel={".*": 0.0},
 )
 
-# Stilt contact geoms get condim=3 (frictional) + higher priority; everything
-# else gets condim=1 (frictionless, just for self-collision detection).
+# Stilt contact geoms explicitly get condim=3 (frictional) + friction=1.0.
+# Applied in two passes so the stilt rule is never shadowed by the catch-all.
 STILT_G1_COLLISION = CollisionCfg(
-  geom_names_expr=(".*_collision",),
-  condim={
-    r"^(left|right)_stilt_[lr][1-4]_collision$": 3,
-    ".*_collision": 1,
-  },
+  geom_names_expr=(r"^(left|right)_stilt_[lr][1-4]_collision$",),
+  condim={r"^(left|right)_stilt_[lr][1-4]_collision$": 3},
   priority={r"^(left|right)_stilt_[lr][1-4]_collision$": 1},
-  friction={r"^(left|right)_stilt_[lr][1-4]_collision$": (0.6,)},
+  friction={r"^(left|right)_stilt_[lr][1-4]_collision$": (1.0, 0.005, 0.0001)},
 )
 
 

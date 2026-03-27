@@ -39,12 +39,12 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   for name in ("foot_clearance", "foot_swing_height", "foot_slip"):
     cfg.rewards[name].params["asset_cfg"].site_names = _STILT_SITE_NAMES
 
-  # Stilts need more clearance than G1 feet (longer pendulum, bigger step)
-  cfg.rewards["foot_clearance"].params["target_height"] = 0.25
-  cfg.rewards["foot_swing_height"].params["target_height"] = 0.25
+  # Keep clearance targets same as stock G1 — robot must learn to balance first
+  cfg.rewards["foot_clearance"].params["target_height"] = 0.10
+  cfg.rewards["foot_swing_height"].params["target_height"] = 0.10
 
-  # Enable air-time reward — stilts need a clear lift-and-plant rhythm
-  cfg.rewards["air_time"].weight = 1.0
+  # Keep air-time disabled initially — same as stock G1, enable once walking
+  cfg.rewards["air_time"].weight = 0.0
 
   # ── Observations ───────────────────────────────────────────────────────────
   cfg.observations["critic"].terms["foot_height"].params[
