@@ -1,0 +1,30 @@
+#!/bin/bash -l
+#PBS -N stilt-train
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_id=H100
+#PBS -l walltime=6:00:00
+#PBS -m abe
+#PBS -M n11298111@qut.edu.au
+#PBS -j oe
+
+cd $PBS_O_WORKDIR
+
+# ── Environment setup ──────────────────────────────────────────────────────
+if [ ! -f ".venv/bin/train" ]; then
+    rm -rf .venv
+    ~/miniconda3/bin/python3 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install --upgrade pip --quiet
+    python -m pip install -r requirements.txt --quiet
+else
+    source .venv/bin/activate
+fi
+
+# ── Training ───────────────────────────────────────────────────────────────
+export CUDA_VISIBLE_DEVICES=0
+python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
+    --env.scene.num-envs 4096 \
+    --agent.max-iterations 30000 \
+    --agent.logger wandb \
+    --agent.wandb-project stilt-locomotion \
+    --agent.upload-model False \
+    --agent.save-interval 500

@@ -38,11 +38,12 @@
     <mesh name="right_ankle_pitch_link" file="right_ankle_pitch_link.STL"/>
     <mesh name="right_ankle_roll_link" file="right_ankle_roll_link.STL"/>
 
-    <!-- Stilt: STL is in mm (220 x 80 x 400), scale converts to metres.
-         refpos shifts the mesh so the top face centre lands at the body origin,
-         meaning the stilt hangs straight down from wherever it is parented. -->
+    <!-- Stilt: STL is 220×80×400 mm. refpos is in pre-scale units (mm).
+         Z=400mm face = attachment bracket → sits at ankle origin.
+         Z=0mm face = stilt tip → ends up at z=-0.4m in ankle frame.
+         Z- in ankle_roll_link = toward ground (same as original foot geoms). -->
     <mesh name="stilt" file="stilt.STL" scale="0.001 0.001 0.001"
-          refpos="0.11 0.04 0.4"/>
+          refpos="70 40 435"/>
     <mesh name="waist_yaw_link" file="waist_yaw_link_rev_1_0.STL"/>
     <mesh name="waist_roll_link" file="waist_roll_link_rev_1_0.STL"/>
     <mesh name="torso_link" file="torso_link_rev_1_0.STL"/>
@@ -67,7 +68,7 @@
   </asset>
 
   <worldbody>
-    <body name="pelvis" pos="0 0 0.793" childclass="g1">
+    <body name="pelvis" pos="0 0 1.228" childclass="g1">
       <light pos="0 0 2" mode="trackcom" castshadow="false"/>
       <camera name="tracking" pos="1.734 -1.135 .35" xyaxes="0.552 0.834 -0.000 -0.170 0.112 0.979" mode="trackcom"/>
       <inertial pos="0 0 -0.07605" quat="1 0 -0.000399148 0" mass="3.813" diaginertia="0.010549 0.0093089 0.0079184"/>
@@ -126,9 +127,17 @@
                   <geom name="left_foot7_collision" class="foot_capsule" fromto="0.1 0.026 -0.025 0.05 0.026 -0.025"/> -->
                   <body name="left_stilt" pos="0 0 0">
                     <geom class="visual" material="silver" mesh="stilt"/>
-                    <geom name="left_stilt_tip_collision" type="sphere" size="0.03"
-                          pos="0 0 -0.4" rgba=".2 .6 .2 .3" contype="1" conaffinity="1"/>
-                    <site name="left_stilt_tip" pos="0 0 -0.4"/>
+                    <!-- Left block (STL X 0-78mm, body X -0.070 to +0.008) -->
+                    <geom name="left_stilt_l1_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.055 -0.035 -0.425  -0.055 0.035 -0.425"/>
+                    <geom name="left_stilt_l2_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.035 -0.035 -0.425  -0.035 0.035 -0.425"/>
+                    <geom name="left_stilt_l3_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.015 -0.035 -0.425  -0.015 0.035 -0.425"/>
+                    <geom name="left_stilt_l4_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.005 -0.035 -0.425   0.005 0.035 -0.425"/>
+                    <!-- Right block (STL X 142-220mm, body X +0.072 to +0.150) -->
+                    <geom name="left_stilt_r1_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.082 -0.035 -0.425   0.082 0.035 -0.425"/>
+                    <geom name="left_stilt_r2_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.102 -0.035 -0.425   0.102 0.035 -0.425"/>
+                    <geom name="left_stilt_r3_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.122 -0.035 -0.425   0.122 0.035 -0.425"/>
+                    <geom name="left_stilt_r4_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.140 -0.035 -0.425   0.140 0.035 -0.425"/>
+                    <site name="left_stilt_tip" pos="0.04 0 -0.435"/>
                   </body>
                 </body>
               </body>
@@ -186,9 +195,17 @@
                   <geom name="right_foot7_collision" class="foot_capsule" fromto="0.1 0.026 -0.025 0.05 0.026 -0.025"/> -->
                   <body name="right_stilt" pos="0 0 0">
                     <geom class="visual" material="silver" mesh="stilt"/>
-                    <geom name="right_stilt_tip_collision" type="sphere" size="0.03"
-                          pos="0 0 -0.4" rgba=".2 .6 .2 .3" contype="1" conaffinity="1"/>
-                    <site name="right_stilt_tip" pos="0 0 -0.4"/>
+                    <!-- Left block -->
+                    <geom name="right_stilt_l1_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.055 -0.035 -0.425  -0.055 0.035 -0.425"/>
+                    <geom name="right_stilt_l2_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.035 -0.035 -0.425  -0.035 0.035 -0.425"/>
+                    <geom name="right_stilt_l3_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto="-0.015 -0.035 -0.425  -0.015 0.035 -0.425"/>
+                    <geom name="right_stilt_l4_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.005 -0.035 -0.425   0.005 0.035 -0.425"/>
+                    <!-- Right block -->
+                    <geom name="right_stilt_r1_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.082 -0.035 -0.425   0.082 0.035 -0.425"/>
+                    <geom name="right_stilt_r2_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.102 -0.035 -0.425   0.102 0.035 -0.425"/>
+                    <geom name="right_stilt_r3_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.122 -0.035 -0.425   0.122 0.035 -0.425"/>
+                    <geom name="right_stilt_r4_collision" class="foot_capsule" size="0.01" rgba=".2 .6 .2 .5" fromto=" 0.140 -0.035 -0.425   0.140 0.035 -0.425"/>
+                    <site name="right_stilt_tip" pos="0.04 0 -0.435"/>
                   </body>
                 </body>
               </body>
