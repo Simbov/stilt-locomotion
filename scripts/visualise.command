@@ -3,7 +3,7 @@
 # It will ask which .pt checkpoint to visualise, then open the viewer in your browser.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LOGS_DIR="$SCRIPT_DIR/logs/rsl_rl/g1_velocity"
+LOGS_DIR="$SCRIPT_DIR/logs/rsl_rl"
 
 # ── Pick a checkpoint via native macOS file dialog ────────────────────────────
 CHECKPOINT=$(osascript <<APPLESCRIPT
@@ -27,6 +27,17 @@ fi
 CHECKPOINT_NAME=$(basename "$CHECKPOINT")
 echo "▶  Loading: $CHECKPOINT"
 
+# ── Auto-detect env from log path ─────────────────────────────────────────────
+if [[ "$CHECKPOINT" == *"stilt_g1"* ]]; then
+    ENV_ID="Mjlab-Velocity-Flat-Stilt-G1"
+    PLAY_SCRIPT="$SCRIPT_DIR/scripts/play_stilt.py"
+    echo "   Env: Stilt G1"
+else
+    ENV_ID="Mjlab-Velocity-Flat-Unitree-G1"
+    PLAY_SCRIPT=""
+    echo "   Env: Stock G1"
+fi
+
 # ── Kill any existing viewer ──────────────────────────────────────────────────
 lsof -ti:8080 | xargs kill -9 2>/dev/null
 sleep 1
@@ -34,11 +45,19 @@ sleep 1
 # ── Launch viewer ─────────────────────────────────────────────────────────────
 source "$SCRIPT_DIR/.venv/bin/activate"
 
-play Mjlab-Velocity-Flat-Unitree-G1 \
-    --agent trained \
-    --checkpoint-file "$CHECKPOINT" \
-    --num-envs 4 \
-    --viewer viser &
+if [ -n "$PLAY_SCRIPT" ]; then
+    python "$PLAY_SCRIPT" "$ENV_ID" \
+        --agent trained \
+        --checkpoint-file "$CHECKPOINT" \
+        --num-envs 4 \
+        --viewer viser &
+else
+    play "$ENV_ID" \
+        --agent trained \
+        --checkpoint-file "$CHECKPOINT" \
+        --num-envs 4 \
+        --viewer viser &
+fi
 
 VIEWER_PID=$!
 echo "   Viewer PID: $VIEWER_PID"
