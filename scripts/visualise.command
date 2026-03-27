@@ -2,8 +2,9 @@
 # Double-click this file in Finder to open the checkpoint picker.
 # It will ask which .pt checkpoint to visualise, then open the viewer in your browser.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LOGS_DIR="$SCRIPT_DIR/logs/rsl_rl"
+# Always use the local Desktop copy — the venv only exists there, not on remote mounts.
+PROJECT_DIR="$HOME/Desktop/stilt-locomotion"
+LOGS_DIR="$PROJECT_DIR/logs/rsl_rl"
 
 # ── Pick a checkpoint via native macOS file dialog ────────────────────────────
 CHECKPOINT=$(osascript <<APPLESCRIPT
@@ -30,7 +31,7 @@ echo "▶  Loading: $CHECKPOINT"
 # ── Auto-detect env from log path ─────────────────────────────────────────────
 if [[ "$CHECKPOINT" == *"stilt_g1"* ]]; then
     ENV_ID="Mjlab-Velocity-Flat-Stilt-G1"
-    PLAY_SCRIPT="$SCRIPT_DIR/scripts/play_stilt.py"
+    PLAY_SCRIPT="$PROJECT_DIR/scripts/play_stilt.py"
     echo "   Env: Stilt G1"
 else
     ENV_ID="Mjlab-Velocity-Flat-Unitree-G1"
@@ -43,7 +44,7 @@ lsof -ti:8080 | xargs kill -9 2>/dev/null
 sleep 1
 
 # ── Launch viewer ─────────────────────────────────────────────────────────────
-source "$SCRIPT_DIR/.venv/bin/activate"
+source "$PROJECT_DIR/.venv/bin/activate"
 
 if [ -n "$PLAY_SCRIPT" ]; then
     python "$PLAY_SCRIPT" "$ENV_ID" \
@@ -69,7 +70,7 @@ for i in {1..30}; do
     if curl -s http://localhost:8080 > /dev/null 2>&1; then
         echo "   Ready! Opening browser..."
         open http://localhost:8080
-        osascript -e "display notification \"Viewing: $CHECKPOINT_NAME\" with title \"mjlab Visualiser\" sound name \"Ping\""
+        osascript -e "display notification \"Viewing: $CHECKPOINT_NAME\" with title \"mjlab Visualiser\" sound name \"Ping\"" 2>/dev/null || true
         break
     fi
 done
