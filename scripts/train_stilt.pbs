@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #PBS -N stilt-train
 #PBS -l select=1:ncpus=8:ngpus=1:mem=8GB:gpu_id=H100
-#PBS -l walltime=0:30:00
+#PBS -l walltime=2:00:00
 #PBS -m abe
 #PBS -M n11298111@qut.edu.au
 #PBS -j oe
@@ -23,7 +23,7 @@ fi
 export CUDA_VISIBLE_DEVICES=0
 python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
     --env.scene.num-envs 4096 \
-    --agent.max-iterations 1500 \
+    --agent.max-iterations 6000 \
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
     --agent.upload-model False \
