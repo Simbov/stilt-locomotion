@@ -5,8 +5,10 @@ updating all reward/sensor parameters that reference foot sites or geoms.
 """
 
 from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs.mdp import terminations as base_terminations
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
@@ -53,5 +55,14 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # ── Domain randomisation ───────────────────────────────────────────────────
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = _STILT_GEOM_NAMES
+
+  # ── Terminations ───────────────────────────────────────────────────────────
+  # Stilt G1 pelvis spawn height is ~1.16m (bent knees).
+  # Normal walking range is ~1.0–1.2m. Collapse/sitting drops below ~0.85m.
+  # Terminate early so the robot doesn't waste steps flopping on the floor.
+  cfg.terminations["torso_too_low"] = TerminationTermCfg(
+    func=base_terminations.root_height_below_minimum,
+    params={"minimum_height": 0.85},
+  )
 
   return cfg
