@@ -58,11 +58,14 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # ── Terminations ───────────────────────────────────────────────────────────
   # Stilt G1 pelvis spawn height is ~1.16m (bent knees).
-  # Normal walking range is ~1.0–1.2m. Collapse/sitting drops below ~0.85m.
-  # Terminate early so the robot doesn't waste steps flopping on the floor.
+  # Kinematics check: ankle_roll_link sits at 0.44m, stilt tip at 0.004m.
+  # A pelvis below 0.65m = stilts near horizontal = truly collapsed.
+  # Previous threshold 0.85m was firing after just 13 steps (0.26s) because
+  # any extra knee-bend during early training drops pelvis 0.31m — the robot
+  # never had time to learn anything.
   cfg.terminations["torso_too_low"] = TerminationTermCfg(
     func=base_terminations.root_height_below_minimum,
-    params={"minimum_height": 0.85},
+    params={"minimum_height": 0.65},
   )
 
   return cfg
