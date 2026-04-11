@@ -1,0 +1,168 @@
+STILT LOCOMOTION — FRESH CONTEXT FOR NEW CHAT SESSION
+=======================================================
+Date written: 2026-04-11
+Project: Honours thesis — training Unitree G1 humanoid to walk on stilts using RL
+
+---
+WHAT THIS PROJECT IS
+--------------------
+Training a Unitree G1 humanoid robot to walk on physical stilts (220x80x400 mm aluminum
+extrusion with a flat base). Using mjlab (Isaac Lab API + MuJoCo Warp) and PPO via rsl-rl-lib.
+Training runs on QUT Aqua HPC (H100 GPU). Local dev on MacBook M4 (CPU only).
+
+---
+PROJECT STRUCTURE
+-----------------
+~/Desktop/stilt-locomotion/
+  assets/mjcf/g1/g1.xml        ← Modified G1 MJCF with stilts attached
+  assets/mjcf/g1/assets/       ← STL mesh files (incl. stilt.STL)
+  envs/stilt_g1/
+    env_cfgs.py                ← Stilt env config (rewards, terminations, geom names)
+    stilt_robot.py             ← Robot config (keyframe, CollisionCfg, MJCF path)
+    rl_cfg.py                  ← PPO hyperparameters
+    __init__.py                ← Registers "Mjlab-Velocity-Flat-Stilt-G1"
+  scripts/
+    train_stilt.py             ← Training entry point
+    train_stilt.pbs            ← PBS job: 1 node, 8 CPU, 1xH100, 8GB, 2hr, 6000 iters
+    visualise.command          ← Double-click in Finder → file picker → browser viewer
+  logs/rsl_rl/stilt_g1_velocity/  ← Training logs (copy from HPC via rsync)
+  .venv/                       ← Local venv (mjlab installed)
+  STATUS.md                    ← Current state of the project
+  FUTURE_WORK.md               ← Roadmap and next steps
+  stilt-locomotion-notes.txt   ← Detailed notes (older, may be slightly stale)
+
+---
+STILT DESIGN IN MJCF
+---------------------
+- Stilts attach as rigid bodies (no joint) to left/right ankle_roll_link
+- Stilt mesh: refpos="70 40 435" (mm, pre-scale) aligns attachment face with ankle origin
+- 8 collision capsules per stilt (4 left block + 4 right block), all at z=-0.425, radius=0.01
+  → bottom of capsules at z=-0.435 m from ankle = stilt tip
+- foot_capsule default class: friction="1.0 0.005 0.0001" condim="3" (explicit, not relying on CollisionCfg)
+- Original G1 foot capsules commented out
+- Stilt tip sites: left_stilt_tip / right_stilt_tip at pos="0.04 0 -0.435"
+- Pelvis spawn in MJCF: z=1.228 (standing straight). Training uses z=1.16 via keyframe (bent knees).
+- Kinematics verified: stilt tips are 3 mm above floor at spawn (correct, drops and lands)
+
+---
+ENV CONFIG KEY SETTINGS (envs/stilt_g1/env_cfgs.py)
+----------------------------------------------------
+- site_names = ("left_stilt_tip", "right_stilt_tip")
+- geom_names = 16 stilt capsule names (left/right_stilt_l1-l4/r1-r4_collision)
+- foot_clearance target_height = 0.10 m (same as stock G1 — don't increase yet)
+- foot_swing_height target_height = 0.10 m
+- air_time weight = 0.0 (disabled until robot walks)
+- torso_too_low threshold = 0.65 m (fires if pelvis drops below this)
+- foot_friction randomisation targets stilt capsule geoms
+
+CRITICAL LESSON: threshold was 0.85 m, which caused every episode to end in 13 steps
+(free-fall time from 1.16 m spawn to 0.85 m). This prevented any learning for 1500 iters.
+Fixed to 0.65 m.
+
+---
+COLLISION SETUP (envs/stilt_g1/stilt_robot.py)
+-----------------------------------------------
+CollisionCfg targets ONLY stilt geoms:
+  geom_names_expr = (r"^(left|right)_stilt_[lr][1-4]_collision$",)
+  condim=3, priority=1, friction=(1.0, 0.005, 0.0001)
+
+disable_other_geoms=True (CollisionCfg default) disables all non-stilt geoms.
+This is fine — only stilts touch the ground.
+
+Spawn keyframe: pos=(0, 0, 1.16), same joint angles as stock G1 KNEES_BENT_KEYFRAME.
+Calculation: stock G1 bent-knee spawn = 0.76 m. Stilts add 0.40 m extra ground clearance.
+0.76 + 0.40 = 1.16 m.
+
+---
+TRAINING HISTORY
+----------------
+Stock G1 (no stilts) Run 3 [2026-03-17, 21500 iters, H100]:
+  mean_reward: -1.27 → ~54 (peaked ~68)
+  mean_episode_length: 13 → 995 (full episodes)
+  Baseline confirmed working.
+
+Stilt training Run 4 [2026-03-27_20-32-07, 1499 iters]:
+  BROKEN — torso_too_low threshold 0.85 m caused 13-step episodes
+  Every episode terminated immediately, robot never learned anything
+  foot_slip = 0.0 (contact was fine, just no time to learn)
+
+ALL FIXES PUSHED TO GITHUB. Next job should train correctly.
+
+---
+NEXT RUN
+--------
+On HPC:
+  git pull && qsub scripts/train_stilt.pbs
+
+What to look for after ~500 iterations:
+  - mean_episode_length > 50 (if still 13 → threshold still wrong)
+  - torso_too_low NOT dominant (time_out should start appearing by iter 1000)
+  - track_linear_velocity increasing from near zero
+
+If robot is learning but gait looks wrong:
+  - Enable air_time weight = 0.5 (in env_cfgs.py)
+  - Increase foot_clearance target to 0.15 m after iter 2000
+
+---
+HPC COMMANDS
+------------
+ssh n11298111@aquarius02.hpc.qut.edu.au
+cd ~/stilt-locomotion
+git pull
+qsub scripts/train_stilt.pbs
+qstat -u $USER
+cat stilt-train.o<JOBID>          ← view stdout/stderr
+
+Sync logs to Mac:
+  rsync -avz n11298111@aquarius02.hpc.qut.edu.au:~/stilt-locomotion/logs/ ~/Desktop/stilt-locomotion/logs/
+
+Visualise checkpoint:
+  Double-click scripts/visualise.command in Finder
+  Select checkpoint from logs/rsl_rl/stilt_g1_velocity/<run>/model_XXXX.pt
+
+W&B: https://wandb.ai/simbov04-qut/stilt-locomotion
+
+---
+KEY MJLAB INTERNALS
+--------------------
+Curriculum (in velocity_env_cfg.py):
+  iter 0:      lin_vel_x ±1.0 m/s,  ang_vel_z ±0.5
+  iter 5000:   lin_vel_x -1.5→+2.0, ang_vel_z ±0.7
+  iter 10000:  lin_vel_x -2.0→+3.0
+  (step * 24 because 24 mini-batches per gradient iteration)
+
+CollisionCfg behaviour:
+  - geom_names_expr uses re.match() (NOT full string match, but ^ and $ in pattern work)
+  - disable_other_geoms=True (default) → sets contype=0,conaffinity=0 on non-matched geoms
+  - This is fine for us — only stilt capsules need floor contact
+  - G1_ARTICULATION does NOT contain collision config (only actuators)
+  - FULL_COLLISION is in get_g1_robot_cfg(), not in G1_ARTICULATION
+
+MJCF refpos:
+  - refpos is in pre-scale units (mm when scale="0.001 0.001 0.001")
+  - Formula: body_coord (m) = (stl_coord_mm - refpos_mm) × 0.001
+
+---
+ENVIRONMENT REGISTRATION
+------------------------
+envs/stilt_g1/__init__.py registers "Mjlab-Velocity-Flat-Stilt-G1"
+envs/__init__.py imports stilt_g1
+scripts/train_stilt.py imports envs before calling train
+
+---
+RECENT COMMITS (all pushed)
+----------------------------
+d9532f7  chore(pbs): increase walltime to 2h and max-iterations to 6000
+2e9fbfd  fix(stilt): lower torso_too_low threshold from 0.85m to 0.65m
+1cfcade  feat(stilt): add torso height termination to end collapsed episodes early
+2dafea0  fix(stilt): reduce reward targets and fix friction for early training
+a534459  fix(stilt): symmetric inertia on both stilts, correct spawn height
+
+---
+WHAT NOT TO CHANGE (hard-won fixes, do not revert)
+--------------------------------------------------
+- CUDA_VISIBLE_DEVICES=0 in train_stilt.pbs (PBS sets UUID format, mjlab needs integer)
+- ~/miniconda3/bin/python3 in pbs (module load Python silently fails on GPU compute nodes)
+- PROJECT_DIR="$HOME/Desktop/stilt-locomotion" in visualise.command (not SCRIPT_DIR — HPC mount has no .venv)
+- foot_capsule friction/condim in MJCF default (explicit is better than relying on CollisionCfg)
+- torso_too_low at 0.65 m NOT 0.85 m (0.85 m caused free-fall termination every episode)

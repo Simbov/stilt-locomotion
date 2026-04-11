@@ -2,7 +2,10 @@
 STILT LOCOMOTION PROJECT - SETUP & PROGRESS NOTES
 Unitree G1 Research Edition | Honours Thesis
 ================================================================================
-Last updated: March 2026
+Last updated: April 2026
+
+NOTE: See STATUS.md and FUTURE_WORK.md for current state and roadmap.
+See context.txt for a compact summary to paste into a new chat session.
 
 
 --------------------------------------------------------------------------------
@@ -584,28 +587,132 @@ Stage 6: Safety during real-world testing
 
 
 --------------------------------------------------------------------------------
-NEXT STEPS (as of 2026-03-18)
+STILT MJCF — WHAT WAS BUILT (2026-03-18 to 2026-04-11)
 --------------------------------------------------------------------------------
-Pipeline complete — baseline G1 training working end to end on Aqua + W&B.
+Stilts attached to ankle_roll_link on both sides as rigid bodies (no joint).
 
-Immediate research tasks:
-  [ ] Coordinate with partner on stilt dimensions, tip geometry, mass
-  [ ] Run baseline G1 training to 30k iters (submit 2nd job to continue from 21500)
-        → check if --resume flag exists: .venv/bin/train --help
-        → OR increase walltime to 12hr in train.pbs and rerun from scratch
-  [ ] Analyse final model_21500.pt gait in detail (compare metrics vs iter 5k/10k)
+Stilt STL file: assets/mjcf/g1/assets/stilt.STL (220×80×400 mm physical stilt)
+Loaded with scale="0.001 0.001 0.001" and refpos="70 40 435" (pre-scale mm).
+  IMPORTANT: refpos is in pre-scale mm, NOT metres.
+  Formula: body_coord_m = (stl_coord_mm - refpos_mm) × 0.001
+  Z=435mm face of STL (attachment bracket) sits at ankle origin.
+  Z=0mm face (stilt tip) ends up at z=-0.435m in ankle frame.
 
-Once stilt dimensions known:
-  [ ] Create stilt MJCF in assets/mjcf/ (see MJCF template section above)
-  [ ] Create envs/stilt_env.py (copy g1/env_cfgs.py, modify sites/rewards/pose)
-  [ ] Register new env task in mjlab (see __init__.py in g1 config folder)
-  [ ] Run short stilt training run (start 0.1m, verify robot learns to balance)
-  [ ] Iterate on curriculum stilt length (0.1 → 0.2 → 0.3m etc.)
+8 collision capsules per stilt:
+  Left block (4 pills): x = -0.055 to +0.005 m
+  Right block (4 pills): x = +0.082 to +0.140 m
+  All at z=-0.425 m from ankle, radius=0.01 m → bottom at z=-0.435 m
+  All use class="foot_capsule" which now has explicit friction="1.0 0.005 0.0001" condim="3"
 
-Thesis writing:
-  [ ] Document baseline G1 results (reward curves, gait metrics from W&B)
-  [ ] Compare gait at different curriculum stages (iter 0, 5k, 10k, 21.5k)
-  [ ] Note the LIPM prediction: longer stilts should slow gait frequency (verify)
+Stilt tip sites: left_stilt_tip / right_stilt_tip at pos="0.04 0 -0.435"
+Stilt body inertia: mass=0.5 kg, pos="0.04 0 -0.2", diaginertia="0.008 0.008 0.001"
+Original G1 foot capsules: commented out (disabled, replaced by stilt capsules)
+
+
+--------------------------------------------------------------------------------
+STILT ENVIRONMENT CONFIG (envs/stilt_g1/)
+--------------------------------------------------------------------------------
+env_cfgs.py changes vs stock G1:
+  site_names → ("left_stilt_tip", "right_stilt_tip")
+  geom_names → 16 stilt capsule names for friction randomisation
+  foot_clearance target_height = 0.10 m (same as stock G1 — don't increase until walking)
+  foot_swing_height target_height = 0.10 m
+  air_time weight = 0.0 (disabled — enable to 0.5 once robot walks)
+  torso_too_low = 0.65 m  ← CRITICAL: was 0.85 m, caused free-fall in every episode
+
+stilt_robot.py:
+  Spawn keyframe: pos=(0, 0, 1.16) with same bent-knee joint angles as stock G1
+  Calculation: stock G1 bent-knee spawn 0.76 m + 0.40 m stilt extra = 1.16 m
+  CollisionCfg targets only stilt geoms (16 capsules), condim=3, friction=(1.0,0.005,0.0001)
+  disable_other_geoms=True disables all non-stilt geoms (correct, only stilts touch floor)
+
+Registered environment name: "Mjlab-Velocity-Flat-Stilt-G1"
+
+
+--------------------------------------------------------------------------------
+COLLISION / CONTACT LESSONS LEARNED
+--------------------------------------------------------------------------------
+1. CollisionCfg.disable_other_geoms=True (default) sets contype=0,conaffinity=0 on ALL
+   geoms not matching geom_names_expr. Only matched geoms can contact the floor.
+
+2. The catch-all pattern ".*_collision": 1 in a condim dict applies condim=1 to ALL
+   geoms including the ones you wanted to be condim=3. Use two separate CollisionCfgs
+   or narrow geom_names_expr to only the geoms you care about.
+
+3. G1_ARTICULATION contains only actuators — NOT collision config. FULL_COLLISION is
+   part of get_g1_robot_cfg(), not G1_ARTICULATION. When building custom robot config,
+   you must supply your own CollisionCfg.
+
+4. foot_capsule friction must be set explicitly in MJCF default or CollisionCfg.
+   MuJoCo defaults are [1.0, 0.005, 0.0001] which is reasonable, but explicit is safer.
+
+5. Stilt capsule collision was confirmed working via Python test — all 16 geoms had
+   contype=1, conaffinity=1, condim=3 after CollisionCfg applied.
+
+
+--------------------------------------------------------------------------------
+TRAINING RUNS — STILT G1 (2026-03-27 to 2026-04-11)
+--------------------------------------------------------------------------------
+Run 4 [2026-03-27_20-32-07] — BROKEN (1499 iters, 30 min PBS job):
+  Problem: torso_too_low threshold 0.85 m → every episode ended in 13 steps (free-fall)
+  Evidence:
+    torso_too_low: ~315/iter (100% of episodes)
+    mean_episode_length: 13.0 (constant, never improved)
+    time_out: 0 (not a single episode survived)
+    track_linear_velocity: 0.0008 (robot never moved)
+    foot_slip: ~0.0 (contact was fine — episodes just too short to learn)
+  Root cause: pelvis at 1.16 m, threshold 0.85 m → drop of 0.31 m
+    Free-fall time = sqrt(2*0.31/9.81) ≈ 0.25 s = 12-13 steps at 50Hz policy
+  Fix: lower threshold to 0.65 m (requires 0.51 m drop, well past true collapse)
+
+All fixes committed and pushed. Next run should learn:
+  git pull && qsub scripts/train_stilt.pbs
+
+
+--------------------------------------------------------------------------------
+SCRIPTS OVERVIEW (current)
+--------------------------------------------------------------------------------
+scripts/train_stilt.py       - registers stilt env, calls mjlab train
+scripts/train_stilt.pbs      - PBS job: 2hr walltime, 6000 max iters, 4096 envs, H100
+scripts/train.pbs            - stock G1 training (unchanged, for reference)
+scripts/visualise.command    - double-click in Finder → file picker → viser browser viewer
+scripts/play_stilt.py        - Python launcher for stilt checkpoint visualisation
+
+IMPORTANT in train_stilt.pbs (do not remove):
+  - export CUDA_VISIBLE_DEVICES=0 (PBS uses UUID format, mjlab needs integer index)
+  - ~/miniconda3/bin/python3 (not "module load Python" — silently fails on GPU nodes)
+  - checks .venv/bin/train not just .venv/ (handles partial install state)
+
+IMPORTANT in visualise.command:
+  - PROJECT_DIR="$HOME/Desktop/stilt-locomotion" (hardcoded, not SCRIPT_DIR)
+  - Reason: when run from HPC network mount /Volumes/n11298111/, SCRIPT_DIR points
+    to the mount which has no .venv. Must always use local Desktop copy.
+
+
+--------------------------------------------------------------------------------
+NEXT STEPS (as of 2026-04-11)
+--------------------------------------------------------------------------------
+Immediate:
+  [x] Stilt MJCF built and positioned correctly
+  [x] Stilt environment registered and training pipeline working
+  [x] Friction/contact verified (16 capsules, condim=3, contype=1)
+  [x] torso_too_low threshold bug identified and fixed (0.85→0.65 m)
+  [x] PBS job updated to 2hr/6000 iters
+
+  [ ] Submit next training run and confirm learning (episode_length should increase)
+  [ ] Monitor W&B for first signs of walking (iter 500-1000)
+
+Once walking:
+  [ ] Enable air_time reward (weight=0.5) in env_cfgs.py
+  [ ] Increase foot_clearance target to 0.15-0.20 m
+  [ ] Investigate stilt length curriculum (parametric MJCF or runtime body pos)
+  [ ] Coordinate with partner on physical stilt length range for curriculum
+
+Thesis:
+  [ ] Document Run 4 failure as a learning (over-aggressive termination kills training)
+  [ ] Compare stilt vs stock G1 convergence curves
+  [ ] Verify LIPM prediction: longer stilts → slower gait frequency (ω = sqrt(g/h))
+  [ ] Plan sim-to-real timeline (ONNX export → unitree_sdk2py → harness testing)
 
 ================================================================================
 END OF NOTES
