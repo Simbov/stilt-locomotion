@@ -1,12 +1,12 @@
 STILT LOCOMOTION — FRESH CONTEXT FOR NEW CHAT SESSION
 =======================================================
-Date written: 2026-04-11
+Date written: 2026-04-18
 Project: Honours thesis — training Unitree G1 humanoid to walk on stilts using RL
 
 ---
 WHAT THIS PROJECT IS
 --------------------
-Training a Unitree G1 humanoid robot to walk on physical stilts (220x80x400 mm aluminum
+Training a Unitree G1 humanoid robot to walk on physical stilts (220x80x400 mm aluminium
 extrusion with a flat base). Using mjlab (Isaac Lab API + MuJoCo Warp) and PPO via rsl-rl-lib.
 Training runs on QUT Aqua HPC (H100 GPU). Local dev on MacBook M4 (CPU only).
 
@@ -17,7 +17,8 @@ PROJECT STRUCTURE
   assets/mjcf/g1/g1.xml        ← Modified G1 MJCF with stilts attached
   assets/mjcf/g1/assets/       ← STL mesh files (incl. stilt.STL)
   envs/stilt_g1/
-    env_cfgs.py                ← Stilt env config (rewards, terminations, geom names)
+    env_cfgs.py                ← Stilt env config (rewards, terminations, geom names, mass curriculum)
+    curriculums.py             ← stilt_mass_curriculum class
     stilt_robot.py             ← Robot config (keyframe, CollisionCfg, MJCF path)
     rl_cfg.py                  ← PPO hyperparameters
     __init__.py                ← Registers "Mjlab-Velocity-Flat-Stilt-G1"
@@ -26,10 +27,24 @@ PROJECT STRUCTURE
     train_stilt.pbs            ← PBS job: 1 node, 8 CPU, 1xH100, 8GB, 2hr, 6000 iters
     visualise.command          ← Double-click in Finder → file picker → browser viewer
   logs/rsl_rl/stilt_g1_velocity/  ← Training logs (copy from HPC via rsync)
-  .venv/                       ← Local venv (mjlab installed)
+  mjlab/                       ← Git submodule, mjlab v1.3.0 source (NOT used at runtime — pip installs from requirements.txt)
+  .venv/                       ← Local venv (mjlab installed, CPU-only warp)
   STATUS.md                    ← Current state of the project
   FUTURE_WORK.md               ← Roadmap and next steps
-  stilt-locomotion-notes.txt   ← Detailed notes (older, may be slightly stale)
+  context.txt                  ← This file
+
+---
+FRAMEWORK VERSION
+-----------------
+mjlab v1.3.0 (upgraded 2026-04-18 from v1.2.0)
+Git tags: v0.2-mjlab-1.3, v0.3-stilt-mass-curriculum
+
+Key v1.3 additions relevant to this project:
+- termination_curriculum (staged termination param scheduling)
+- dr.pseudo_inertia fix: no longer loads cuSOLVER, saves ~4 GB GPU memory
+- RecorderManager for data collection during rollouts
+- ActionTermCfg.clip for clamping processed actions
+- Checkpoint hot-swap in Viser viewer
 
 ---
 STILT DESIGN IN MJCF
@@ -43,6 +58,7 @@ STILT DESIGN IN MJCF
 - Stilt tip sites: left_stilt_tip / right_stilt_tip at pos="0.04 0 -0.435"
 - Pelvis spawn in MJCF: z=1.228 (standing straight). Training uses z=1.16 via keyframe (bent knees).
 - Kinematics verified: stilt tips are 3 mm above floor at spawn (correct, drops and lands)
+- Stilt inertial: mass=0.5 kg (rough estimate), diaginertia=(0.008, 0.008, 0.001)
 
 ---
 ENV CONFIG KEY SETTINGS (envs/stilt_g1/env_cfgs.py)
@@ -54,10 +70,31 @@ ENV CONFIG KEY SETTINGS (envs/stilt_g1/env_cfgs.py)
 - air_time weight = 0.0 (disabled until robot walks)
 - torso_too_low threshold = 0.65 m (fires if pelvis drops below this)
 - foot_friction randomisation targets stilt capsule geoms
+- stilt_mass event: dr.pseudo_inertia on left_stilt + right_stilt, alpha_range set by curriculum
 
 CRITICAL LESSON: threshold was 0.85 m, which caused every episode to end in 13 steps
 (free-fall time from 1.16 m spawn to 0.85 m). This prevented any learning for 1500 iters.
 Fixed to 0.65 m.
+
+---
+STILT MASS CURRICULUM (envs/stilt_g1/curriculums.py)
+------------------------------------------------------
+Purpose: determine what stilt mass range the policy can handle, to inform mechanical design.
+
+Uses dr.pseudo_inertia with alpha_range. Alpha is a log-scale mass multiplier:
+  mass = 0.5 * e^(2*alpha)   ← 0.5 kg is the MJCF baseline
+
+Four stages (step = training iteration × 24 steps/iter):
+  Step    0: alpha (0.0,   0.0)  → fixed 0.5 kg   (learn to stand first)
+  Step 1000: alpha (-0.18, 0.18) → 0.35–0.72 kg   (±~35%)
+  Step 2000: alpha (-0.35, 0.35) → 0.25–1.0 kg    (±~50%)
+  Step 4000: alpha (-0.35, 0.69) → 0.25–2.0 kg    (heavier bias for mech design)
+
+Uses pseudo_inertia (NOT body_mass) so inertia tensor scales consistently with mass.
+Logs stilt_mass_min_kg and stilt_mass_max_kg to W&B as Curriculum/stilt_mass/*.
+
+Interpretation: if training degrades when the upper bound exceeds X kg, the mechanical
+design should target a stilt mass below X kg.
 
 ---
 COLLISION SETUP (envs/stilt_g1/stilt_robot.py)
@@ -86,7 +123,9 @@ Stilt training Run 4 [2026-03-27_20-32-07, 1499 iters]:
   Every episode terminated immediately, robot never learned anything
   foot_slip = 0.0 (contact was fine, just no time to learn)
 
-ALL FIXES PUSHED TO GITHUB. Next job should train correctly.
+Stilt training Run 5 [pending]:
+  All fixes applied. mjlab v1.3.0. Stilt mass curriculum active.
+  Local smoke test passed (10 iters, 16 envs, CPU).
 
 ---
 NEXT RUN
@@ -94,10 +133,13 @@ NEXT RUN
 On HPC:
   git pull && qsub scripts/train_stilt.pbs
 
+Note: if git submodule update fails, ignore it — PBS installs mjlab from requirements.txt.
+
 What to look for after ~500 iterations:
   - mean_episode_length > 50 (if still 13 → threshold still wrong)
   - torso_too_low NOT dominant (time_out should start appearing by iter 1000)
   - track_linear_velocity increasing from near zero
+  - Curriculum/stilt_mass/* stepping up at iters 1000, 2000, 4000
 
 If robot is learning but gait looks wrong:
   - Enable air_time weight = 0.5 (in env_cfgs.py)
@@ -123,46 +165,58 @@ Visualise checkpoint:
 W&B: https://wandb.ai/simbov04-qut/stilt-locomotion
 
 ---
+LOCAL DEV COMMANDS
+------------------
+Smoke test (Mac, CPU only):
+  .venv/bin/python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
+    --env.scene.num-envs 16 --agent.max-iterations 10 --gpu-ids None
+
+NOTE: --gpu-ids None is ONLY for Mac. Remove it on HPC (default --gpu-ids 0 is correct).
+
+---
 KEY MJLAB INTERNALS
 --------------------
-Curriculum (in velocity_env_cfg.py):
-  iter 0:      lin_vel_x ±1.0 m/s,  ang_vel_z ±0.5
-  iter 5000:   lin_vel_x -1.5→+2.0, ang_vel_z ±0.7
-  iter 10000:  lin_vel_x -2.0→+3.0
-  (step * 24 because 24 mini-batches per gradient iteration)
+Velocity curriculum (built into mjlab, always active):
+  step 0:       lin_vel_x ±1.0 m/s, ang_vel_z ±0.5
+  step 5000×24: lin_vel_x -1.5→+2.0, ang_vel_z ±0.7
+  step 10000×24: lin_vel_x -2.0→+3.0
+  (step = iteration × 24 because 24 mini-batches per gradient iteration)
 
 CollisionCfg behaviour:
-  - geom_names_expr uses re.match() (NOT full string match, but ^ and $ in pattern work)
-  - disable_other_geoms=True (default) → sets contype=0,conaffinity=0 on non-matched geoms
-  - This is fine for us — only stilt capsules need floor contact
+  - geom_names_expr uses re.match() (^ and $ work as expected)
+  - disable_other_geoms=True → sets contype=0,conaffinity=0 on non-matched geoms
   - G1_ARTICULATION does NOT contain collision config (only actuators)
-  - FULL_COLLISION is in get_g1_robot_cfg(), not in G1_ARTICULATION
 
 MJCF refpos:
   - refpos is in pre-scale units (mm when scale="0.001 0.001 0.001")
   - Formula: body_coord (m) = (stl_coord_mm - refpos_mm) × 0.001
 
+SceneEntityCfg import: from mjlab.managers.scene_entity_config import SceneEntityCfg
+  (NOT from mjlab.entity — that module does not export it)
+
+Curriculum field on ManagerBasedRlEnvCfg is cfg.curriculum (singular, NOT cfg.curriculums)
+
 ---
 ENVIRONMENT REGISTRATION
 ------------------------
 envs/stilt_g1/__init__.py registers "Mjlab-Velocity-Flat-Stilt-G1"
-envs/__init__.py imports stilt_g1
-scripts/train_stilt.py imports envs before calling train
+scripts/train_stilt.py imports envs.stilt_g1 before calling mjlab.scripts.train.main()
 
 ---
-RECENT COMMITS (all pushed)
-----------------------------
+RECENT COMMITS
+--------------
+b549513  fix(stilt): correct SceneEntityCfg import path and curriculum field name
+52f802c  feat(stilt): add stilt mass curriculum via pseudo_inertia DR
+907c8ea  chore: upgrade mjlab submodule to v1.3.0
+d2cd4eb  docs: add STATUS, FUTURE_WORK, context docs and update notes
 d9532f7  chore(pbs): increase walltime to 2h and max-iterations to 6000
-2e9fbfd  fix(stilt): lower torso_too_low threshold from 0.85m to 0.65m
-1cfcade  feat(stilt): add torso height termination to end collapsed episodes early
-2dafea0  fix(stilt): reduce reward targets and fix friction for early training
-a534459  fix(stilt): symmetric inertia on both stilts, correct spawn height
 
 ---
 WHAT NOT TO CHANGE (hard-won fixes, do not revert)
 --------------------------------------------------
 - CUDA_VISIBLE_DEVICES=0 in train_stilt.pbs (PBS sets UUID format, mjlab needs integer)
 - ~/miniconda3/bin/python3 in pbs (module load Python silently fails on GPU compute nodes)
-- PROJECT_DIR="$HOME/Desktop/stilt-locomotion" in visualise.command (not SCRIPT_DIR — HPC mount has no .venv)
+- PROJECT_DIR="$HOME/Desktop/stilt-locomotion" in visualise.command (not SCRIPT_DIR)
 - foot_capsule friction/condim in MJCF default (explicit is better than relying on CollisionCfg)
 - torso_too_low at 0.65 m NOT 0.85 m (0.85 m caused free-fall termination every episode)
+- Use dr.pseudo_inertia for mass DR, NOT dr.body_mass (body_mass leaves inertia wrong)
