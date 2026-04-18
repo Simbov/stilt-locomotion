@@ -80,15 +80,17 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     func=stilt_mass_curriculum,
     params={
       "event_name": "stilt_mass",
+      # common_step_counter increments once per env step, not per training
+      # iteration. With num_steps_per_env=24, multiply iter targets by 24.
       "stages": [
-        # step 0 → fixed 0.5 kg baseline while policy is still learning to stand
-        {"step":    0, "alpha_range": (0.0,   0.0)},
-        # step 1000 → ±~35%: 0.35–0.72 kg
-        {"step": 1000, "alpha_range": (-0.18, 0.18)},
-        # step 2000 → ±~50%: 0.25–1.0 kg
-        {"step": 2000, "alpha_range": (-0.35, 0.35)},
-        # step 4000 → asymmetric upper push: 0.25–2.0 kg (heavier bias for mech design)
-        {"step": 4000, "alpha_range": (-0.35, 0.69)},
+        # iter 0 → fixed 0.5 kg baseline while policy is still learning to stand
+        {"step":       0, "alpha_range": (0.0,   0.0)},
+        # iter 1000 → ±~35%: 0.35–0.72 kg
+        {"step": 1000 * 24, "alpha_range": (-0.18, 0.18)},
+        # iter 2000 → ±~50%: 0.25–1.0 kg
+        {"step": 2000 * 24, "alpha_range": (-0.35, 0.35)},
+        # iter 4000 → asymmetric upper push: 0.25–2.0 kg (heavier bias for mech design)
+        {"step": 4000 * 24, "alpha_range": (-0.35, 0.69)},
       ],
     },
   )
