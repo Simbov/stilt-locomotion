@@ -13,7 +13,7 @@ from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.entity import SceneEntityCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
 from .curriculums import stilt_mass_curriculum
@@ -76,7 +76,7 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
 
   # ── Curricula ──────────────────────────────────────────────────────────────
-  cfg.curriculums["stilt_mass"] = CurriculumTermCfg(
+  cfg.curriculum["stilt_mass"] = CurriculumTermCfg(
     func=stilt_mass_curriculum,
     params={
       "event_name": "stilt_mass",
