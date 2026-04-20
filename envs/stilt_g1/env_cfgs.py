@@ -7,13 +7,12 @@ updating all reward/sensor parameters that reference foot sites or geoms.
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import terminations as base_terminations
 from mjlab.envs.mdp import dr
-from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor import ObjRef, TerrainHeightSensorCfg
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
 from .curriculums import stilt_mass_curriculum
@@ -41,9 +40,21 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = STILT_G1_ACTION_SCALE
 
+  # ── Sensors ────────────────────────────────────────────────────────────────
+  # Rewire foot_height_scan to use stilt tip sites instead of stock foot sites.
+  # This feeds both foot_height obs and height-based rewards (foot_clearance,
+  # foot_swing_height) with the correct stilt tip positions.
+  for sensor in cfg.scene.sensors or ():
+    if sensor.name == "foot_height_scan":
+      assert isinstance(sensor, TerrainHeightSensorCfg)
+      sensor.frame = tuple(
+        ObjRef(type="site", name=s, entity="robot") for s in _STILT_SITE_NAMES
+      )
+
   # ── Rewards ────────────────────────────────────────────────────────────────
-  # Foot sites → stilt tips
-  for name in ("foot_clearance", "foot_swing_height", "foot_slip"):
+  # foot_clearance and foot_slip use asset_cfg.site_names; foot_swing_height
+  # uses the contact sensor subtree (ankle_roll_link) so needs no change.
+  for name in ("foot_clearance", "foot_slip"):
     cfg.rewards[name].params["asset_cfg"].site_names = _STILT_SITE_NAMES
 
   # Keep clearance targets same as stock G1 — robot must learn to balance first
@@ -52,11 +63,6 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # Keep air-time disabled initially — same as stock G1, enable once walking
   cfg.rewards["air_time"].weight = 0.0
-
-  # ── Observations ───────────────────────────────────────────────────────────
-  cfg.observations["critic"].terms["foot_height"].params[
-    "asset_cfg"
-  ].site_names = _STILT_SITE_NAMES
 
   # ── Domain randomisation ───────────────────────────────────────────────────
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = _STILT_GEOM_NAMES
@@ -76,24 +82,26 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
 
   # ── Curricula ──────────────────────────────────────────────────────────────
-  cfg.curriculum["stilt_mass"] = CurriculumTermCfg(
-    func=stilt_mass_curriculum,
-    params={
-      "event_name": "stilt_mass",
-      # common_step_counter increments once per env step, not per training
-      # iteration. With num_steps_per_env=24, multiply iter targets by 24.
-      "stages": [
-        # iter 0 → fixed 0.5 kg baseline while policy is still learning to stand
-        {"step":       0, "alpha_range": (0.0,   0.0)},
-        # iter 1000 → ±~35%: 0.35–0.72 kg
-        {"step": 1000 * 24, "alpha_range": (-0.18, 0.18)},
-        # iter 2000 → ±~50%: 0.25–1.0 kg
-        {"step": 2000 * 24, "alpha_range": (-0.35, 0.35)},
-        # iter 4000 → asymmetric upper push: 0.25–2.0 kg (heavier bias for mech design)
-        {"step": 4000 * 24, "alpha_range": (-0.35, 0.69)},
-      ],
-    },
-  )
+  if not play:
+    cfg.curriculum["stilt_mass"] = CurriculumTermCfg(
+      func=stilt_mass_curriculum,
+      params={
+        "event_name": "stilt_mass",
+        # common_step_counter increments once per env step, not per training
+        # iteration. With num_steps_per_env=24, multiply iter targets by 24.
+        # Baseline = 1.5 kg.
+        "stages": [
+          # iter 0 → fixed 1.5 kg baseline
+          {"step":       0, "alpha_range": (0.0,   0.0)},
+          # iter 500 → ±~50%: 1.0–2.2 kg
+          {"step":  500 * 24, "alpha_range": (-0.2,  0.2)},
+          # iter 1000 → wider: 0.67–3.3 kg
+          {"step": 1000 * 24, "alpha_range": (-0.4,  0.4)},
+          # iter 2000 → aggressive upper push: 0.5–6.0 kg
+          {"step": 2000 * 24, "alpha_range": (-0.55, 0.69)},
+        ],
+      },
+    )
 
   # ── Terminations ───────────────────────────────────────────────────────────
   # Stilt G1 pelvis spawn height is ~1.16m (bent knees).

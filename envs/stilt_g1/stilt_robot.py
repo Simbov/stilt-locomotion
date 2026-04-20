@@ -9,7 +9,6 @@ from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
   G1_ARTICULATION,
 )
 from mjlab.entity import EntityCfg
-from mjlab.utils.os import update_assets
 from mjlab.utils.spec_config import CollisionCfg
 
 # Path to our local stilt MJCF (relative to this file: ../../assets/mjcf/g1/g1.xml)
@@ -17,16 +16,8 @@ STILT_G1_XML = Path(__file__).parent.parent.parent / "assets" / "mjcf" / "g1" / 
 assert STILT_G1_XML.exists(), f"Stilt MJCF not found: {STILT_G1_XML}"
 
 
-def _get_assets(meshdir: str) -> dict[str, bytes]:
-  assets: dict[str, bytes] = {}
-  update_assets(assets, STILT_G1_XML.parent / "assets", meshdir)
-  return assets
-
-
 def get_stilt_spec() -> mujoco.MjSpec:
-  spec = mujoco.MjSpec.from_file(str(STILT_G1_XML))
-  spec.assets = _get_assets(spec.meshdir)
-  return spec
+  return mujoco.MjSpec.from_file(str(STILT_G1_XML))
 
 
 # Spawn height: stock G1 knees-bent pelvis (0.76m) + extra stilt extension.

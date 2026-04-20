@@ -50,7 +50,7 @@ if [ -n "$PLAY_SCRIPT" ]; then
     python "$PLAY_SCRIPT" "$ENV_ID" \
         --agent trained \
         --checkpoint-file "$CHECKPOINT" \
-        --num-envs 4 \
+        --num-envs 1 \
         --viewer viser &
 else
     play "$ENV_ID" \

@@ -14,7 +14,7 @@
 - `foot_capsule` default class explicitly sets `friction="1.0 0.005 0.0001" condim="3"` to guarantee ground contact regardless of CollisionCfg
 - Pelvis spawn height in MJCF: 1.228 m (standing straight; training uses 1.16 m via keyframe)
 - Stilt tip sites: `left_stilt_tip`, `right_stilt_tip` at `pos="0.04 0 -0.435"`
-- Stilt inertial properties: `mass="0.5"`, `diaginertia="0.008 0.008 0.001"`, COM at `pos="0.04 0 -0.2"`
+- Stilt inertial properties: **`mass="1.5"`**, **`diaginertia="0.024 0.024 0.003"`** (increased from 0.5 kg on 2026-04-21), COM at `pos="0.04 0 -0.2"`
 
 ### Stilt Environment (`envs/stilt_g1/`)
 | File | Purpose |
@@ -33,24 +33,24 @@
 - `torso_too_low` threshold → 0.65 m (was wrongly set to 0.85 m — caused free-fall termination every 13 steps)
 - Friction randomisation targets stilt capsule geoms
 - **Stilt mass curriculum active** — see curriculum section below
+- **Viewer Fix (2026-04-21)**: Torque monitor now updates while simulation is paused.
 
-### Stilt Mass Curriculum
+### Stilt Mass Curriculum (Aggressive Version)
 
 A four-stage curriculum progressively widens the stilt mass range during training.
 Uses `dr.pseudo_inertia` (via `alpha_range`) so mass and inertia scale consistently —
-physically correct for a density change. Baseline stilt mass is 0.5 kg per stilt.
+physically correct for a density change. **Baseline stilt mass is 1.5 kg per stilt.**
 
-| Step | alpha range | Approx mass range | Purpose |
-|---|---|---|---|
-| 0 | `(0.0, 0.0)` | fixed 0.5 kg | Learn to stand/walk before adding variability |
-| 1000 | `(-0.18, 0.18)` | 0.35–0.72 kg | Introduce modest variability |
-| 2000 | `(-0.35, 0.35)` | 0.25–1.0 kg | Widen to half/double baseline |
-| 4000 | `(-0.35, 0.69)` | 0.25–2.0 kg | Asymmetric upper push to stress heavier designs |
+| Iter | Step | alpha range | Approx mass range | Purpose |
+|---|---|---|---|---|
+| 0 | 0 | `(0.0, 0.0)` | fixed 1.5 kg | Solid baseline for heavy design |
+| 500 | 12000 | `(-0.2, 0.2)` | 1.0–2.2 kg | Introduce variability early |
+| 1000 | 24000 | `(-0.4, 0.4)` | 0.67–3.3 kg | Widen to stress testing levels |
+| 2000 | 48000 | `(-0.55, 0.69)` | 0.5–6.0 kg | Maximum stress range (up to 4× baseline) |
 
-`alpha` is a log-scale multiplier: mass = 0.5 × e^(2α). The asymmetric upper end at step 4000
-(up to ~2.0 kg) is intentional — it stress-tests heavier stilt designs to inform the mechanical
-design spec. The curriculum logs `Curriculum/stilt_mass/stilt_mass_min_kg` and
-`stilt_mass_max_kg` to TensorBoard/W&B.
+`alpha` is a log-scale multiplier: mass = 1.5 × e^(2α). The curriculum reaches its maximum
+stress range by iteration 2000 to accelerate robustness discovery. The curriculum logs 
+`Curriculum/stilt_mass/stilt_mass_min_kg` and `stilt_mass_max_kg` to TensorBoard/W&B.
 
 ### Training Pipeline
 - `scripts/train_stilt.py` — registers env and calls mjlab's `train` entry point

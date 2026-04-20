@@ -587,7 +587,7 @@ Stage 6: Safety during real-world testing
 
 
 --------------------------------------------------------------------------------
-STILT MJCF — WHAT WAS BUILT (2026-03-18 to 2026-04-11)
+STILT MJCF — WHAT WAS BUILT (2026-03-18 to 2026-04-21)
 --------------------------------------------------------------------------------
 Stilts attached to ankle_roll_link on both sides as rigid bodies (no joint).
 
@@ -605,7 +605,7 @@ Loaded with scale="0.001 0.001 0.001" and refpos="70 40 435" (pre-scale mm).
   All use class="foot_capsule" which now has explicit friction="1.0 0.005 0.0001" condim="3"
 
 Stilt tip sites: left_stilt_tip / right_stilt_tip at pos="0.04 0 -0.435"
-Stilt body inertia: mass=0.5 kg, pos="0.04 0 -0.2", diaginertia="0.008 0.008 0.001"
+Stilt body inertia: mass=1.5 kg (increased 2026-04-21), pos="0.04 0 -0.2", diaginertia="0.024 0.024 0.003"
 Original G1 foot capsules: commented out (disabled, replaced by stilt capsules)
 
 
@@ -619,6 +619,12 @@ env_cfgs.py changes vs stock G1:
   foot_swing_height target_height = 0.10 m
   air_time weight = 0.0 (disabled — enable to 0.5 once robot walks)
   torso_too_low = 0.65 m  ← CRITICAL: was 0.85 m, caused free-fall in every episode
+  STILT MASS CURRICULUM: aggressive range 0.5 kg to 6.0 kg (completes iter 2000)
+
+Viewer Features:
+  - STILT MASS SLIDER: Live mass randomization/selection.
+  - JOINT TORQUE MONITOR: Shows qfrc_actuator and qfrc_bias.
+  - FIX (2026-04-21): Torque monitor now updates correctly when viewer is paused.
 
 stilt_robot.py:
   Spawn keyframe: pos=(0, 0, 1.16) with same bent-knee joint angles as stock G1

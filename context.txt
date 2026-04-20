@@ -58,7 +58,7 @@ STILT DESIGN IN MJCF
 - Stilt tip sites: left_stilt_tip / right_stilt_tip at pos="0.04 0 -0.435"
 - Pelvis spawn in MJCF: z=1.228 (standing straight). Training uses z=1.16 via keyframe (bent knees).
 - Kinematics verified: stilt tips are 3 mm above floor at spawn (correct, drops and lands)
-- Stilt inertial: mass=0.5 kg (rough estimate), diaginertia=(0.008, 0.008, 0.001)
+- Stilt inertial: mass=1.5 kg (increased 2026-04-21), diaginertia=(0.024, 0.024, 0.003)
 
 ---
 ENV CONFIG KEY SETTINGS (envs/stilt_g1/env_cfgs.py)
@@ -71,6 +71,7 @@ ENV CONFIG KEY SETTINGS (envs/stilt_g1/env_cfgs.py)
 - torso_too_low threshold = 0.65 m (fires if pelvis drops below this)
 - foot_friction randomisation targets stilt capsule geoms
 - stilt_mass event: dr.pseudo_inertia on left_stilt + right_stilt, alpha_range set by curriculum
+- VIEWER FIX (2026-04-21): Torque monitor (qfrc_bias) now updates while paused.
 
 CRITICAL LESSON: threshold was 0.85 m, which caused every episode to end in 13 steps
 (free-fall time from 1.16 m spawn to 0.85 m). This prevented any learning for 1500 iters.
@@ -82,13 +83,13 @@ STILT MASS CURRICULUM (envs/stilt_g1/curriculums.py)
 Purpose: determine what stilt mass range the policy can handle, to inform mechanical design.
 
 Uses dr.pseudo_inertia with alpha_range. Alpha is a log-scale mass multiplier:
-  mass = 0.5 * e^(2*alpha)   ← 0.5 kg is the MJCF baseline
+  mass = 1.5 * e^(2*alpha)   ← 1.5 kg is the MJCF baseline (updated 2026-04-21)
 
 Four stages (step = training iteration × 24 steps/iter):
-  Step    0: alpha (0.0,   0.0)  → fixed 0.5 kg   (learn to stand first)
-  Step 1000: alpha (-0.18, 0.18) → 0.35–0.72 kg   (±~35%)
-  Step 2000: alpha (-0.35, 0.35) → 0.25–1.0 kg    (±~50%)
-  Step 4000: alpha (-0.35, 0.69) → 0.25–2.0 kg    (heavier bias for mech design)
+  Step    0: alpha (0.0,   0.0)  → fixed 1.5 kg   (heavy baseline)
+  Step  500: alpha (-0.2,  0.2)  → 1.0–2.2 kg     (iter 500)
+  Step 1000: alpha (-0.4,  0.4)  → 0.67–3.3 kg    (iter 1000)
+  Step 2000: alpha (-0.55, 0.69) → 0.5–6.0 kg     (iter 2000 - aggressive)
 
 Uses pseudo_inertia (NOT body_mass) so inertia tensor scales consistently with mass.
 Logs stilt_mass_min_kg and stilt_mass_max_kg to W&B as Curriculum/stilt_mass/*.

@@ -64,6 +64,6 @@ class stilt_mass_curriculum:
     # Report actual kg bounds for easy monitoring in tensorboard/wandb.
     import math
     return {
-      "stilt_mass_min_kg": torch.tensor(0.5 * math.exp(2 * lo)),
-      "stilt_mass_max_kg": torch.tensor(0.5 * math.exp(2 * hi)),
+      "stilt_mass_min_kg": torch.tensor(1.5 * math.exp(2 * lo)),
+      "stilt_mass_max_kg": torch.tensor(1.5 * math.exp(2 * hi)),
     }
