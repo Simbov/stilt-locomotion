@@ -211,5 +211,4 @@ register_mjlab_task(
     play_env_cfg=stilt_g1_flat_env_cfg(play=True),
     rl_cfg=stilt_g1_ppo_runner_cfg(),
     runner_cls=VelocityOnPolicyRunner,
-    play_viewer_setup_fn=_stilt_mass_play_gui,
 )
