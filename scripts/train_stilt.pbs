@@ -12,23 +12,16 @@ cd $PBS_O_WORKDIR
 git submodule update --init
 
 # ── Environment setup ──────────────────────────────────────────────────────
-if [ ! -f ".venv/bin/train" ]; then
-    rm -rf .venv
-    ~/miniconda3/bin/python3 -m venv .venv
-    source .venv/bin/activate
-    python -m pip install --upgrade pip --quiet
-    python -m pip install -r requirements.txt --quiet
-else
-    source .venv/bin/activate
+if ! command -v uv &>/dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
+source "$HOME/.local/bin/env"
 
-# Always install local mjlab editably so the submodule takes precedence
-# over any PyPI mjlab that may have been cached in the venv.
-python -m pip install -e mjlab/ --no-deps --quiet
+uv sync --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
 export CUDA_VISIBLE_DEVICES=0
-python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
+uv run python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 6000 \
     --agent.logger wandb \
