@@ -44,23 +44,24 @@ the mjlab checks before committing:
 cd mjlab && make check && make test-fast && cd ..
 ```
 
-### Viewer extension hooks (added in this project)
+**Keep mjlab changes minimal** — the submodule tracks stock v1.3.0 so upgrading
+to v1.4 is a simple `cd mjlab && git pull`. Avoid patching mjlab source files;
+extend behaviour from this project's code instead (see viewer pattern below).
 
-Three mjlab files were extended to support task-specific viewer GUI:
+### Viewer GUI pattern
 
-- **`mjlab/src/mjlab/viewer/viser/viewer.py`** — `ViserPlayViewer.__init__` accepts
-  `extra_gui_fn: Callable[[viser.ViserServer, EnvProtocol], None] | None`. When
-  set, it is called at the end of the Controls tab during `setup()`.
+Task-specific viewer controls are injected by subclassing `ViserPlayViewer` in
+[`scripts/play_stilt.py`](scripts/play_stilt.py) and monkey-patching it into
+`mjlab.scripts.play` before `main()` is called. No mjlab source files are
+modified. The GUI function itself lives in
+[`envs/stilt_g1/__init__.py`](envs/stilt_g1/__init__.py) as
+`_stilt_mass_play_gui(server, env)`.
 
-- **`mjlab/src/mjlab/tasks/registry.py`** — `register_mjlab_task` accepts
-  `play_viewer_setup_fn: Callable | None`. Stored in `_TaskCfg`; retrieved via
-  `load_play_viewer_setup_fn(task_id)`.
-
-- **`mjlab/src/mjlab/scripts/play.py`** — Loads `play_viewer_setup_fn` from the
-  registry and passes it to `ViserPlayViewer` as `extra_gui_fn`.
-
-To add viewer controls for a new task, define a `(server, env) -> None` function
-and pass it as `play_viewer_setup_fn` when calling `register_mjlab_task`.
+To add viewer controls for a new task, follow the same pattern:
+1. Define a `(server, env) -> None` function in your env's `__init__.py`
+2. Subclass `ViserPlayViewer` in your play script, call `super().setup()` then
+   your function
+3. Monkey-patch before calling `mjlab.scripts.play.main()`
 
 ## Running the viewer
 

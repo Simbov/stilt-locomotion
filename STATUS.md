@@ -1,5 +1,5 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-04-18**
+**Last updated: 2026-04-21**
 
 ---
 
@@ -54,13 +54,14 @@ stress range by iteration 2000 to accelerate robustness discovery. The curriculu
 
 ### Training Pipeline
 - `scripts/train_stilt.py` — registers env and calls mjlab's `train` entry point
-- `scripts/train_stilt.pbs` — PBS job: 1 node, 8 CPUs, 1×H100, 8 GB RAM, 2 hr walltime, 6000 max iterations
+- `scripts/train_stilt.pbs` — PBS job: 1 node, 8 CPUs, 1×H100, 8 GB RAM, 8 hr walltime, 6000 max iterations
 - `scripts/visualise.command` — double-click in Finder → file picker → viser browser viewer
 - `scripts/play_stilt.py` — Python launcher for stilt visualisation
 
 ### mjlab Version
 - **v1.3.0** (upgraded from v1.2.0 on 2026-04-18)
-- Installed via `requirements.txt` on HPC; submodule in repo for reference
+- Installed editably from local `mjlab/` submodule via `[tool.uv.sources]` — never PyPI
+- HPC uses `uv sync` (from `uv.lock`); uv is auto-installed by the PBS script if missing
 - Key v1.3 additions relevant to this project: `termination_curriculum`, `RecorderManager`,
   `RelativeJointPositionAction`, `CollisionCfg` gains `margin`/`gap`/`solmix`, reward bar panel in Viser
 
@@ -120,13 +121,13 @@ Verified via Python test (`assets/mjcf/g1/` directory):
 ssh n11298111@aquarius02.hpc.qut.edu.au
 cd ~/stilt-locomotion
 git pull
-git submodule update --init   # only needed if submodule not yet initialised
+rm -rf .venv   # only needed when switching from old pip-based venv to uv
 qsub scripts/train_stilt.pbs
 qstat -u $USER
 ```
 
-Note: if `git submodule update` fails due to network restrictions, it can be skipped —
-the PBS script installs mjlab from `requirements.txt` (pip), not from the submodule.
+The PBS script handles everything automatically: initialises the mjlab submodule,
+installs uv if missing, and runs `uv sync` to build the venv from `uv.lock`.
 
 Sync logs to Mac:
 ```bash
