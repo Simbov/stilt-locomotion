@@ -8,6 +8,9 @@
 
 cd $PBS_O_WORKDIR
 
+# Ensure mjlab submodule is populated (safe no-op if already initialised).
+git submodule update --init
+
 # ── Environment setup ──────────────────────────────────────────────────────
 if [ ! -f ".venv/bin/train" ]; then
     rm -rf .venv
@@ -18,6 +21,10 @@ if [ ! -f ".venv/bin/train" ]; then
 else
     source .venv/bin/activate
 fi
+
+# Always install local mjlab editably so the submodule takes precedence
+# over any PyPI mjlab that may have been cached in the venv.
+python -m pip install -e mjlab/ --no-deps --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
 export CUDA_VISIBLE_DEVICES=0
