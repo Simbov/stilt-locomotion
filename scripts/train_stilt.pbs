@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #PBS -N stilt-train
-#PBS -l select=1:ncpus=8:ngpus=1:mem=8GB:gpu_id=H100
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
 #PBS -l walltime=8:00:00
 #PBS -m abe
 #PBS -M n11298111@qut.edu.au
@@ -13,11 +13,6 @@ if ! command -v uv &>/dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 export PATH="$HOME/.local/bin:$PATH"
-
-# Wipe any stale venv — necessary because an old venv may have mjlab pinned
-# to the local submodule path (empty on HPC), which causes uv to fail even
-# with --no-sources. Fresh install takes ~3 min, negligible vs 8 hr walltime.
-rm -rf .venv
 
 uv sync --quiet
 
