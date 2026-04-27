@@ -17,38 +17,30 @@ stilt-locomotion/
 
 ## Environment setup
 
-The project uses **uv**. `uv.lock` pins `mjlab==1.3.0` from PyPI, which is what
-runs on the HPC. Locally, override with the editable submodule so changes to
-`mjlab/` take effect immediately:
+The project uses **uv**. Setup is identical locally and on HPC:
 
 ```sh
-uv sync                                    # install all deps (mjlab from PyPI)
-uv pip install -e mjlab/ --no-deps        # override with local editable (dev only)
-uv run <cmd>                               # run anything inside the managed venv
+uv sync      # install all deps including mjlab==1.3.0 from PyPI
+uv run <cmd> # run anything inside the managed venv
 ```
-
-Verify the correct mjlab is active after the editable install:
-
-```sh
-uv run python -c "import mjlab; print(mjlab.__file__)"
-# Should print: .../stilt-locomotion/mjlab/src/mjlab/__init__.py
-```
-
-The editable override is not in `pyproject.toml` or `uv.lock` — it only lives in
-your local venv. Re-run `uv pip install -e mjlab/ --no-deps` after any `uv sync`.
 
 ## Modifying mjlab
-
-Edits to `mjlab/src/mjlab/` take effect immediately (editable install). Run
-the mjlab checks before committing:
-
-```sh
-cd mjlab && make check && make test-fast && cd ..
-```
 
 **Keep mjlab changes minimal** — the submodule tracks stock v1.3.0 so upgrading
 to v1.4 is a simple `cd mjlab && git pull`. Avoid patching mjlab source files;
 extend behaviour from this project's code instead (see viewer pattern below).
+
+If you do need to test a mjlab change locally, install it editably as a one-off:
+
+```sh
+uv pip install -e mjlab/ --no-deps
+```
+
+Run the mjlab checks before committing any mjlab changes:
+
+```sh
+cd mjlab && make check && make test-fast && cd ..
+```
 
 ### Viewer GUI pattern
 
