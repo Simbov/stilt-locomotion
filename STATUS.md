@@ -126,8 +126,8 @@ qsub scripts/train_stilt.pbs
 qstat -u $USER
 ```
 
-The PBS script handles everything automatically: initialises the mjlab submodule,
-installs uv if missing, and runs `uv sync` to build the venv from `uv.lock`.
+The PBS script handles everything automatically: installs uv if missing, then runs
+`uv sync --no-sources` which installs mjlab from PyPI (no submodule needed on HPC).
 
 Sync logs to Mac:
 ```bash

@@ -8,16 +8,15 @@
 
 cd $PBS_O_WORKDIR
 
-# Ensure mjlab submodule is populated (safe no-op if already initialised).
-git submodule update --init
-
 # ── Environment setup ──────────────────────────────────────────────────────
 if ! command -v uv &>/dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
-source "$HOME/.local/bin/env"
+export PATH="$HOME/.local/bin:$PATH"
 
-uv sync --quiet
+# --no-sources: ignore [tool.uv.sources] and install mjlab==1.3.0 from PyPI
+# instead of the local submodule (submodule is for local dev only).
+uv sync --no-sources --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
 export CUDA_VISIBLE_DEVICES=0
