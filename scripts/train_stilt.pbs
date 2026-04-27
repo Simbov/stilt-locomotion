@@ -14,8 +14,12 @@ if ! command -v uv &>/dev/null; then
 fi
 export PATH="$HOME/.local/bin:$PATH"
 
-# --no-sources: ignore [tool.uv.sources] and install mjlab==1.3.0 from PyPI
-# instead of the local submodule (submodule is for local dev only).
+# Wipe any stale venv — necessary because an old venv may have mjlab pinned
+# to the local submodule path (empty on HPC), which causes uv to fail even
+# with --no-sources. Fresh install takes ~3 min, negligible vs 8 hr walltime.
+rm -rf .venv
+
+# --no-sources: install mjlab==1.3.0 from PyPI, not the local submodule.
 uv sync --no-sources --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
