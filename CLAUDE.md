@@ -17,23 +17,25 @@ stilt-locomotion/
 
 ## Environment setup
 
-The project uses **uv** with the local `mjlab/` submodule installed editably:
+The project uses **uv**. `uv.lock` pins `mjlab==1.3.0` from PyPI, which is what
+runs on the HPC. Locally, override with the editable submodule so changes to
+`mjlab/` take effect immediately:
 
 ```sh
-uv sync          # Install / update all deps (uses local mjlab/ — never PyPI mjlab)
-uv run <cmd>     # Run anything inside the managed venv
+uv sync                                    # install all deps (mjlab from PyPI)
+uv pip install -e mjlab/ --no-deps        # override with local editable (dev only)
+uv run <cmd>                               # run anything inside the managed venv
 ```
 
-`mjlab/` is pinned via `[tool.uv.sources]` in `pyproject.toml`, so `uv sync`
-always installs the local source. **Never `pip install mjlab`** — it would
-shadow the local source and changes to `mjlab/` would stop taking effect.
-
-Verify the correct mjlab is active:
+Verify the correct mjlab is active after the editable install:
 
 ```sh
 uv run python -c "import mjlab; print(mjlab.__file__)"
 # Should print: .../stilt-locomotion/mjlab/src/mjlab/__init__.py
 ```
+
+The editable override is not in `pyproject.toml` or `uv.lock` — it only lives in
+your local venv. Re-run `uv pip install -e mjlab/ --no-deps` after any `uv sync`.
 
 ## Modifying mjlab
 
