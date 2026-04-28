@@ -1,5 +1,5 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-04-21**
+**Last updated: 2026-04-28**
 
 ---
 
@@ -23,20 +23,19 @@
 | `curriculums.py` | Custom `stilt_mass_curriculum` class — widens stilt mass range over training |
 | `stilt_robot.py` | Robot config — local MJCF path, spawn keyframe, CollisionCfg |
 | `rl_cfg.py` | PPO hyperparameters (inherited from stock G1) |
-| `__init__.py` | Registers `Mjlab-Velocity-Flat-Stilt-G1` environment name |
+| `__init__.py` | Registers `Mjlab-Velocity-Flat-Stilt-G1` + viewer GUI (mass slider, torque monitor) |
 
 **Key environment settings vs stock G1:**
-- `site_names` → stilt tips (not foot sites)
-- `foot_clearance` target height → 0.10 m (matches stock G1 — do NOT increase yet)
-- `foot_swing_height` target height → 0.10 m
+- `foot_height_scan` sensor rewired to stilt tip sites (drives foot_height obs + height rewards)
+- `foot_clearance` / `foot_slip` use stilt tip sites via `asset_cfg.site_names`
+- `foot_clearance` target height → 0.10 m
+- `foot_swing_height` target height → 0.10 m (uses contact-sensor subtree, no site override needed)
 - `air_time` weight → 0.0 (disabled until robot can walk)
-- `torso_too_low` threshold → 0.65 m (was wrongly set to 0.85 m — caused free-fall termination every 13 steps)
+- `torso_too_low` threshold → 0.65 m
 - Friction randomisation targets stilt capsule geoms
 - **Stilt mass curriculum active** — see curriculum section below
-- **Viewer Fix (2026-04-21)**: Torque monitor now updates while simulation is paused.
 
-### Stilt Mass Curriculum (Aggressive Version)
-
+### Stilt Mass Curriculum
 A four-stage curriculum progressively widens the stilt mass range during training.
 Uses `dr.pseudo_inertia` (via `alpha_range`) so mass and inertia scale consistently —
 physically correct for a density change. **Baseline stilt mass is 1.5 kg per stilt.**
@@ -48,22 +47,19 @@ physically correct for a density change. **Baseline stilt mass is 1.5 kg per sti
 | 1000 | 24000 | `(-0.4, 0.4)` | 0.67–3.3 kg | Widen to stress testing levels |
 | 2000 | 48000 | `(-0.55, 0.69)` | 0.5–6.0 kg | Maximum stress range (up to 4× baseline) |
 
-`alpha` is a log-scale multiplier: mass = 1.5 × e^(2α). The curriculum reaches its maximum
-stress range by iteration 2000 to accelerate robustness discovery. The curriculum logs 
-`Curriculum/stilt_mass/stilt_mass_min_kg` and `stilt_mass_max_kg` to TensorBoard/W&B.
+`alpha` is a log-scale multiplier: mass = 1.5 × e^(2α). The curriculum logs
+`Curriculum/stilt_mass/stilt_mass_min_kg` and `stilt_mass_max_kg` to W&B.
 
 ### Training Pipeline
 - `scripts/train_stilt.py` — registers env and calls mjlab's `train` entry point
-- `scripts/train_stilt.pbs` — PBS job: 1 node, 8 CPUs, 1×H100, 8 GB RAM, 8 hr walltime, 6000 max iterations
+- `scripts/train_stilt.pbs` — PBS job: 1 node, 8 CPUs, 1×H100, 32 GB RAM, 8 hr walltime, 6000 max iterations
 - `scripts/visualise.command` — double-click in Finder → file picker → viser browser viewer
-- `scripts/play_stilt.py` — Python launcher for stilt visualisation
+- `scripts/play_stilt.py` — local viewer with mass slider + joint torque monitor GUI
 
-### mjlab Version
-- **v1.3.0** (upgraded from v1.2.0 on 2026-04-18)
-- Installed editably from local `mjlab/` submodule via `[tool.uv.sources]` — never PyPI
-- HPC uses `uv sync` (from `uv.lock`); uv is auto-installed by the PBS script if missing
-- Key v1.3 additions relevant to this project: `termination_curriculum`, `RecorderManager`,
-  `RelativeJointPositionAction`, `CollisionCfg` gains `margin`/`gap`/`solmix`, reward bar panel in Viser
+### Package Versions
+- **mjlab v1.3.0** from PyPI (local `mjlab/` submodule is for reference/dev only)
+- **mujoco 3.7.0** + **mujoco-warp 3.7.0.1** — pinned; 3.8.0 has a memory leak (~670 MB/iter)
+- All deps managed via `uv` / `uv.lock` — run `uv sync` to install
 
 ---
 
@@ -86,24 +82,12 @@ To revert to any tag: `git checkout <tag-name>`
 | stilt run 2 | 2026-03-27_12-43-32 | ~2000 | slipping | stilt slipping, friction not applied |
 | stilt run 3 | 2026-03-27_16-51-02 | short | abandoned | early test |
 | stilt run 4 | 2026-03-27_20-32-07 | 1499 | **broken** | 13-step episodes — torso_too_low threshold too high (0.85 m) |
-| **stilt run 5** | pending | — | **ready to submit** | mjlab v1.3, stilt mass curriculum active |
+| **stilt run 5** | 2026-04-27_13-28-41 | 6000 | **running** | mjlab v1.3, stilt mass curriculum, 1.5 kg baseline |
 
-**Run 4 diagnosis (logs confirmed):**
-- `torso_too_low` fired on 100% of episodes (~315/iter)
-- `mean_episode_length` = 13 steps = 0.26 s → pure free-fall time from 1.16 m to 0.85 m
-- `track_linear_velocity` → 0.0008 (robot never moved)
-- `foot_slip` → 0.0 (confirmed stilts DID make contact, just episodes too short to learn)
-- Root cause: 0.85 m threshold too aggressive for a 1.16 m spawn height with bent knees
-
-**Fixes applied before Run 5:**
-1. `torso_too_low` lowered from 0.85 → 0.65 m
-2. `foot_capsule` MJCF default gets explicit `friction` + `condim=3`
-3. `CollisionCfg` narrowed to stilt geoms only
-4. `foot_clearance` / `foot_swing_height` targets reduced 0.25 → 0.10 m
-5. `air_time` weight set to 0.0
-6. PBS walltime extended to 2 hr, max-iterations to 6000
-7. mjlab upgraded to v1.3.0
-8. Stilt mass curriculum added
+**Run 5 setup:**
+- 4096 envs, H100, ~3700 steps/sec, 32 GB RAM
+- Warp kernels cached after first iteration (no recompile overhead)
+- W&B: https://wandb.ai/simbov04-qut/stilt-locomotion/runs/ke9bopwf
 
 ---
 
@@ -121,13 +105,12 @@ Verified via Python test (`assets/mjcf/g1/` directory):
 ssh n11298111@aquarius02.hpc.qut.edu.au
 cd ~/stilt-locomotion
 git pull
-rm -rf .venv   # only needed when switching from old pip-based venv to uv
 qsub scripts/train_stilt.pbs
 qstat -u $USER
 ```
 
-The PBS script handles everything automatically: installs uv if missing, then runs
-`uv sync --no-sources` which installs mjlab from PyPI (no submodule needed on HPC).
+The PBS script handles everything automatically: installs uv if missing, runs `uv sync`
+to build the venv from `uv.lock` (mjlab from PyPI, no submodule needed).
 
 Sync logs to Mac:
 ```bash
