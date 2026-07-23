@@ -1,0 +1,17 @@
+--- a/deploy/robots/g1/src/State_RLBase.cpp
++++ b/deploy/robots/g1/src/State_RLBase.cpp
+@@ -30,6 +30,13 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
+     return cmd;
+ }
+
++REGISTER_OBSERVATION(base_lin_vel)
++{
++    // No direct body-velocity sensor on hardware — zero-fill.
++    // Policy uses this as measured-speed feedback, not commanded speed.
++    // Replace with a KF/EKF velocity estimate when available.
++    return std::vector<float>{0.f, 0.f, 0.f};
++}
++
+ }  // namespace isaaclab
+
+ State_RLBase::State_RLBase(int state_mode, std::string state_string)
