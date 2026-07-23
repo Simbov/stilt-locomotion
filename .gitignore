@@ -32,3 +32,12 @@ checkpoints/
 
 # Weights & Biases
 wandb/
+
+# Local debug/test artifacts
+tea_debug.log
+g1_walking_test_terminal.txt
+*.tgz
+
+# Deployment runtime (external repo + robot rsync mount)
+unitree_rl_mjlab/
+unitree@*/
