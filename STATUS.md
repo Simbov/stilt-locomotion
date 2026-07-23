@@ -1,5 +1,22 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-04-28**
+**Last updated: 2026-07-23**
+
+---
+
+## Deployment Infrastructure (`deploy/`)
+
+Hardware deployment config is ready for when Run 5 produces a good checkpoint.
+
+| File | Purpose |
+|---|---|
+| `deploy/config/g1_stilt/deploy.yaml` | Full deployment config — obs space, PD gains, action scale, all from ONNX metadata |
+| `deploy/README.md` | Step-by-step: sync ONNX from HPC, set up unitree_rl_mjlab, build, run on robot |
+
+**Runtime:** [unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) C++ binary (`g1_ctrl`) using ONNX Runtime 1.22.0 at 50 Hz. Launched via SSH — not app-based.
+
+**`base_lin_vel` handling:** zeroed (policy still responds to joystick velocity commands normally; `base_lin_vel` is measured feedback, not commanded speed).
+
+**To deploy a new checkpoint:** sync ONNX from HPC → copy to robot → run `./g1_ctrl`. No rebuild needed.
 
 ---
 
@@ -57,9 +74,13 @@ physically correct for a density change. **Baseline stilt mass is 1.5 kg per sti
 - `scripts/play_stilt.py` — local viewer with mass slider + joint torque monitor GUI
 
 ### Package Versions
-- **mjlab v1.3.0** from PyPI (local `mjlab/` submodule is for reference/dev only)
-- **mujoco 3.7.0** + **mujoco-warp 3.7.0.1** — pinned; 3.8.0 has a memory leak (~670 MB/iter)
+- **mjlab v1.5.3** from PyPI (local `mjlab/` submodule pinned to v1.5.3 for reference/dev)
+- **mujoco 3.10.0** + **mujoco-warp 3.10.0.3** — driven by mjlab 1.5 (clean PyPI pins,
+  no project-level pin). rsl-rl-lib 5.4.0, warp-lang 1.14.0.
 - All deps managed via `uv` / `uv.lock` — run `uv sync` to install
+- **⚠️ Memory-leak watch:** mujoco was previously pinned `<3.8` to dodge a 3.8.0
+  ~670 MB/iter leak. 1.5 jumps to **3.10**, bypassing 3.8 — re-verify GPU memory
+  over a long HPC run before trusting it (`nvidia-smi` / W&B system metrics).
 
 ---
 
