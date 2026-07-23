@@ -41,3 +41,7 @@ g1_walking_test_terminal.txt
 # Deployment runtime (external repo + robot rsync mount)
 unitree_rl_mjlab/
 unitree@*/
+
+# Local-only: personal Claude Code settings + HPC sync script (contain machine/user-specific values)
+.claude/settings.local.json
+scripts/sync_logs.sh

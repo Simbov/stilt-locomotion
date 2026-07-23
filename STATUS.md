@@ -108,7 +108,7 @@ To revert to any tag: `git checkout <tag-name>`
 **Run 5 setup:**
 - 4096 envs, H100, ~3700 steps/sec, 32 GB RAM
 - Warp kernels cached after first iteration (no recompile overhead)
-- W&B: https://wandb.ai/simbov04-qut/stilt-locomotion/runs/ke9bopwf
+- W&B: https://wandb.ai/<wandb-entity>/stilt-locomotion/runs/<run-id>
 
 ---
 
@@ -123,7 +123,7 @@ Verified via Python test (`assets/mjcf/g1/` directory):
 
 ## HPC Access
 ```bash
-ssh n11298111@aquarius02.hpc.qut.edu.au
+ssh <hpc-user>@aquarius02.hpc.qut.edu.au
 cd ~/stilt-locomotion
 git pull
 qsub scripts/train_stilt.pbs
@@ -135,7 +135,7 @@ to build the venv from `uv.lock` (mjlab from PyPI, no submodule needed).
 
 Sync logs to Mac:
 ```bash
-rsync -avz n11298111@aquarius02.hpc.qut.edu.au:~/stilt-locomotion/logs/ ~/Desktop/stilt-locomotion/logs/
+rsync -avz <hpc-user>@aquarius02.hpc.qut.edu.au:~/stilt-locomotion/logs/ ~/Desktop/stilt-locomotion/logs/
 ```
 
-W&B: https://wandb.ai/simbov04-qut/stilt-locomotion
+W&B: https://wandb.ai/<wandb-entity>/stilt-locomotion
