@@ -100,38 +100,53 @@ Once the robot walks stably at 0.435 m:
 
 ## Phase 6 — Sim-to-Real Transfer
 
-### 6a. Policy Export
-```python
-# mjlab auto-exports .onnx at end of training
-# Also manually:
-from mjlab.utils.export import export_policy
-export_policy(checkpoint_path="logs/.../model_6000.pt", output_path="stilt_policy.onnx")
-```
+Deployment infrastructure is in place — see `deploy/` for all files and instructions.
 
-### 6b. Observation Format
-The policy expects at 50 Hz:
-```
-base_lin_vel      (3)   — from IMU or state estimator
-base_ang_vel      (3)   — from IMU
-projected_gravity (3)   — from IMU + orientation filter
-joint_pos         (29)  — relative to default, from encoders
-joint_vel         (29)  — from encoders
-last_action       (29)  — previous joint position targets
-velocity_command  (3)   — vx, vy, yaw from joystick/planner
-```
+### 6a. Runtime stack
 
-### 6c. Deployment Stack
-- Hardware: Unitree G1 onboard computer (or Jetson Orin)
-- Interface: `unitree_sdk2py` for joint commands
-- Policy runner: `onnxruntime` at 50 Hz
-- PD controllers: run at 1 kHz between policy steps
+Uses [unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab)'s C++ runtime:
+- ONNX policy loaded by `OrtRunner` (ONNX Runtime 1.22.0)
+- 50 Hz control loop via DDS (`rt/lowcmd` / `rt/lowstate`)
+- PD gains, default pose, and action scale all embedded in the ONNX metadata and read by `deploy/config/g1_stilt/deploy.yaml`
+- Launched via SSH: `./g1_ctrl --net eth0 --config deploy.yaml --policy policy.onnx`
 
-### 6d. Safety Protocol
-1. Start with robot on overhead gantry/harness
-2. Test standing still (zero velocity command) before walking
-3. Increase commanded velocity gradually
-4. Emergency stop: set velocity command to (0, 0, 0)
-5. First real-world test: short stilts (0.3 m), flat ground
+There is no app-based policy selection — the custom policy runs as a standalone
+binary alongside (not inside) Unitree's factory controllers.
+
+### 6b. Observation format (99-dim, 50 Hz)
+
+| Term | Dims | Source |
+|---|---|---|
+| `base_lin_vel` | 3 | **Zeroed** (no hardware sensor; policy is robust for non-speed-critical use) |
+| `base_ang_vel` | 3 | IMU gyroscope (`rt/lowstate`) |
+| `projected_gravity` | 3 | Computed from IMU quaternion |
+| `joint_pos` | 29 | Encoder positions minus default pose |
+| `joint_vel` | 29 | Encoder velocities |
+| `last_action` | 29 | Previous policy output |
+| `velocity_command` | 3 | vx, vy, yaw from joystick |
+
+`base_lin_vel` is zeroed because the policy's goal is stable stilt walking, not
+precise speed tracking. Variable speed still works — it is controlled via
+`velocity_command` (joystick), which is unaffected. If precise speed tracking
+becomes important, read from `rt/sportmodestate velocity[3]` and rotate to body
+frame via IMU quaternion.
+
+### 6c. Transfer steps
+
+1. Sync ONNX from HPC: `rsync -avz <hpc>:~/stilt-locomotion/logs/ logs/`
+2. Copy ONNX + config to robot: see `deploy/README.md`
+3. Add `base_lin_vel` zero-fill stub in unitree_rl_mjlab observation manager (one-time)
+4. Build: `cmake .. && make -j$(nproc)`
+5. SSH to robot and run `./g1_ctrl`
+
+For a new training run, only step 1–2 need repeating.
+
+### 6d. Safety protocol
+1. Robot on overhead gantry/harness — mandatory for all early tests
+2. Short stilts (0.3 m) for first hardware tests
+3. Test standing still (zero velocity command) before commanding motion
+4. Increase commanded velocity gradually
+5. Emergency stop: return joystick to centre (velocity command → 0,0,0)
 
 ---
 

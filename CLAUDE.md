@@ -4,7 +4,7 @@
 
 ```
 stilt-locomotion/
-├── mjlab/          # mjlab v1.3 — git submodule, installed editably
+├── mjlab/          # mjlab v1.5 — git submodule (reference/dev), real dep is PyPI pin
 ├── envs/
 │   └── stilt_g1/   # Stilt G1 task (env config, curriculum, rewards, viewer GUI)
 ├── assets/mjcf/g1/ # Modified G1 MJCF with stilt bodies and tip sites
@@ -12,6 +12,9 @@ stilt-locomotion/
 │   ├── visualise.command   # macOS double-click launcher (1 env, viser viewer)
 │   ├── play_stilt.py       # Play wrapper (registers stilt env then calls mjlab play)
 │   └── train_stilt.py      # Training entry point
+├── deploy/
+│   ├── README.md                       # Build + deploy instructions
+│   └── config/g1_stilt/deploy.yaml     # Deployment config (obs, gains, action scale)
 └── logs/rsl_rl/            # Training run outputs (checkpoints, W&B sync)
 ```
 
@@ -20,14 +23,15 @@ stilt-locomotion/
 The project uses **uv**. Setup is identical locally and on HPC:
 
 ```sh
-uv sync      # install all deps including mjlab==1.3.0 from PyPI
+uv sync      # install all deps including mjlab==1.5.0 from PyPI
 uv run <cmd> # run anything inside the managed venv
 ```
 
 ## Modifying mjlab
 
-**Keep mjlab changes minimal** — the submodule tracks stock v1.3.0 so upgrading
-to v1.4 is a simple `cd mjlab && git pull`. Avoid patching mjlab source files;
+**Keep mjlab changes minimal** — the submodule tracks stock v1.5.0 so upgrading
+is a simple `cd mjlab && git checkout <new-tag>` plus bumping the PyPI pin in
+`pyproject.toml`. Avoid patching mjlab source files;
 extend behaviour from this project's code instead (see viewer pattern below).
 
 If you do need to test a mjlab change locally, install it editably as a one-off:
@@ -131,7 +135,7 @@ afterward — the `@requires_model_fields` decorator only annotates the
 function; it does not auto-trigger recomputation. This is already done in
 `_apply()` in `__init__.py`.
 
-## Stilt G1 environment (mjlab 1.3 API notes)
+## Stilt G1 environment (mjlab API notes — current as of v1.5)
 
 Key differences from the base G1 env that matter when updating:
 
