@@ -1,0 +1,105 @@
+"""Section loads must satisfy statics in a known static stand."""
+
+import mujoco
+import pytest
+
+from envs.stilt_g1.loads import SECTIONS, contact_forces, section_loads
+from envs.stilt_g1.stilt_robot import STILT_KNEE_ANGLE, STILT_SPAWN_HEIGHT
+
+
+@pytest.fixture(scope="module")
+def standing():
+  """Rest the robot vertically on a floor so the stilts carry its full weight.
+
+  This is a statics rig, not a locomotion test. Two departures from the real
+  model, both deliberate:
+
+  * The project MJCF has no ground plane — mjlab supplies the terrain — so one
+    is added here.
+  * The pelvis free joint is replaced by a single vertical slide. With the
+    ankles welded the robot cannot balance passively and would simply topple,
+    which tells us nothing about section loads. Constraining it to sink
+    vertically means the ground reaction must equal total weight at rest, which
+    is exactly the invariant these tests check.
+  """
+  from tests.conftest import G1_XML
+
+  spec = mujoco.MjSpec.from_file(str(G1_XML))
+  spec.worldbody.add_geom(
+    name="test_floor",
+    type=mujoco.mjtGeom.mjGEOM_PLANE,
+    size=[10.0, 10.0, 0.1],
+    pos=[0.0, 0.0, 0.0],
+  )
+
+  for joint in spec.joints:
+    if joint.type == mujoco.mjtJoint.mjJNT_FREE:
+      joint.type = mujoco.mjtJoint.mjJNT_SLIDE
+      joint.axis = [0.0, 0.0, 1.0]
+    else:
+      # Hold the leg pose; without this the knees fold under load.
+      actuator = spec.add_actuator(target=joint.name, trntype=mujoco.mjtTrn.mjTRN_JOINT)
+      # Stiff enough to hold the pose, soft enough not to blow up on contact.
+      actuator.gainprm[0] = 600.0
+      actuator.biasprm[1] = -600.0
+      actuator.biasprm[2] = -60.0
+
+  model = spec.compile()
+  data = mujoco.MjData(model)
+
+  hold = {"hip_pitch": -STILT_KNEE_ANGLE, "knee": STILT_KNEE_ANGLE}
+  for side in ("left", "right"):
+    for joint, value in hold.items():
+      jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{side}_{joint}_joint")
+      data.qpos[model.jnt_qposadr[jid]] = value
+      aid = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{side}_{joint}_joint"
+      )
+      data.ctrl[aid] = value
+  data.qpos[0] = STILT_SPAWN_HEIGHT
+
+  for _ in range(8000):
+    mujoco.mj_step(model, data)
+
+  # Only the vertical DoF matters for the weight-balance invariant; the arms
+  # keep drifting slowly and are irrelevant to the stilt load path.
+  assert abs(data.qvel[0]) < 0.01, f"rig did not settle: {data.qvel[0]:+.4f} m/s"
+  return model, data
+
+
+def test_all_sections_reported(standing):
+  model, data = standing
+  assert set(section_loads(model, data, "left")) == set(SECTIONS)
+
+
+def test_every_capsule_is_reported(standing):
+  model, data = standing
+  forces = contact_forces(model, data, "left")
+  assert len(forces) == 8
+
+
+def test_ground_reaction_supports_the_robot(standing):
+  """Total vertical contact force must roughly equal total weight when static."""
+  model, data = standing
+  total = sum(
+    sum(contact_forces(model, data, side).values()) for side in ("left", "right")
+  )
+  weight = model.body_mass.sum() * abs(model.opt.gravity[2])
+  assert total == pytest.approx(weight, rel=0.25)
+
+
+def test_axial_load_grows_toward_the_mount(standing):
+  """Each section carries everything below it, so axial load is monotonic."""
+  model, data = standing
+  loads = section_loads(model, data, "left")
+  structural = [s for s in SECTIONS if s != "stilt_brace"]
+  axials = [loads[s].axial for s in structural]
+  assert axials == sorted(axials), axials
+
+
+def test_loads_are_finite(standing):
+  model, data = standing
+  for side in ("left", "right"):
+    for load in section_loads(model, data, side).values():
+      for value in (load.axial, load.shear, load.bending, load.torsion):
+        assert value == value and abs(value) < 1e6
