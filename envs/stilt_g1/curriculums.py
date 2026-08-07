@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -49,6 +50,7 @@ class stilt_mass_curriculum:
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor,
     event_name: str,
+    baseline_kg: float,
     stages: list[dict],
   ) -> dict[str, torch.Tensor]:
     del env_ids, event_name, stages
@@ -62,9 +64,67 @@ class stilt_mass_curriculum:
 
     lo, hi = active_range
     # Report actual kg bounds for easy monitoring in tensorboard/wandb.
-    import math
-
     return {
-      "stilt_mass_min_kg": torch.tensor(1.5 * math.exp(2 * lo)),
-      "stilt_mass_max_kg": torch.tensor(1.5 * math.exp(2 * hi)),
+      "stilt_mass_min_kg": torch.tensor(baseline_kg * math.exp(2 * lo)),
+      "stilt_mass_max_kg": torch.tensor(baseline_kg * math.exp(2 * hi)),
+    }
+
+
+class stilt_height_curriculum:
+  """Widen the stilt telescope offset range over training.
+
+  Stages define ``step`` thresholds and the target ``offset_range`` tuple, in
+  metres of vertical offset applied to the ``*_stilt_post_inner`` bodies.
+  Negative offset pushes the inner post down, i.e. a longer stilt.
+
+  Example::
+
+    CurriculumTermCfg(
+      func=stilt_height_curriculum,
+      params={
+        "event_name": "stilt_height",
+        "stages": [
+          {"step": 0, "offset_range": (0.0, 0.0)},
+          {"step": 750 * 24, "offset_range": (-0.020, 0.020)},
+        ],
+      },
+    )
+  """
+
+  # Ground-to-mount height of the assembled stilt, for reporting only.
+  NOMINAL_HEIGHT_M = 0.4075
+
+  def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
+    event_name: str = cfg.params["event_name"]
+    self._stages: list[dict] = cfg.params["stages"]
+    self._term_cfg = env.event_manager.get_term_cfg(event_name)
+
+    steps = [s["step"] for s in self._stages]
+    if steps != sorted(steps):
+      raise ValueError(
+        f"stilt_height_curriculum stages must be in nondecreasing step order, "
+        f"got {steps}."
+      )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    event_name: str,
+    stages: list[dict],
+  ) -> dict[str, torch.Tensor]:
+    del env_ids, event_name, stages
+
+    active_range = self._term_cfg.params["ranges"]
+    for stage in self._stages:
+      if env.common_step_counter >= stage["step"]:
+        active_range = stage["offset_range"]
+
+    self._term_cfg.params["ranges"] = active_range
+
+    lo, hi = active_range
+    # A negative offset lengthens the stilt, so the bounds swap.
+    return {
+      "stilt_height_min_m": torch.tensor(self.NOMINAL_HEIGHT_M - hi),
+      "stilt_height_max_m": torch.tensor(self.NOMINAL_HEIGHT_M - lo),
     }
