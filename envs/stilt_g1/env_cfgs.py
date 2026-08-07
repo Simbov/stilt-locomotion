@@ -5,13 +5,13 @@ updating all reward/sensor parameters that reference foot sites or geoms.
 """
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp import terminations as base_terminations
 from mjlab.envs.mdp import dr
+from mjlab.envs.mdp import terminations as base_terminations
+from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.termination_manager import TerminationTermCfg
-from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ObjRef, TerrainHeightSensorCfg
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
@@ -75,9 +75,7 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     mode="reset",
     params={
       "alpha_range": (0.0, 0.0),  # overwritten each step by the curriculum
-      "asset_cfg": SceneEntityCfg(
-        "robot", body_names=["left_stilt", "right_stilt"]
-      ),
+      "asset_cfg": SceneEntityCfg("robot", body_names=["left_stilt", "right_stilt"]),
     },
   )
 
@@ -92,11 +90,11 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         # Baseline = 1.5 kg.
         "stages": [
           # iter 0 → fixed 1.5 kg baseline
-          {"step":       0, "alpha_range": (0.0,   0.0)},
+          {"step": 0, "alpha_range": (0.0, 0.0)},
           # iter 500 → ±~50%: 1.0–2.2 kg
-          {"step":  500 * 24, "alpha_range": (-0.2,  0.2)},
+          {"step": 500 * 24, "alpha_range": (-0.2, 0.2)},
           # iter 1000 → wider: 0.67–3.3 kg
-          {"step": 1000 * 24, "alpha_range": (-0.4,  0.4)},
+          {"step": 1000 * 24, "alpha_range": (-0.4, 0.4)},
           # iter 2000 → aggressive upper push: 0.5–6.0 kg
           {"step": 2000 * 24, "alpha_range": (-0.55, 0.69)},
         ],

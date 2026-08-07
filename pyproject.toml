@@ -26,6 +26,23 @@ include = ["stilt*"]
 
 [dependency-groups]
 dev = [
+    "fast-simplification>=0.1.13",
     "pytest>=9.1.1",
+    "ruff>=0.16.1",
 ]
+
+[tool.ruff]
+# Mirrors mjlab/pyproject.toml so project code matches the submodule's style.
+indent-width = 2
+exclude = ["mjlab", "logs", "wandb"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["B011"]
+
+[tool.pytest.ini_options]
+# Repo root on sys.path so tests can import the `envs` and `scripts` packages,
+# which are workspace code rather than installed distributions.
+pythonpath = ["."]
+testpaths = ["tests"]
 

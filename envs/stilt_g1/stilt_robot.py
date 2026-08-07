@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import mujoco
-
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
   G1_ACTION_SCALE,
   G1_ARTICULATION,
