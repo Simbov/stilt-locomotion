@@ -203,7 +203,7 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # ── Terminations ───────────────────────────────────────────────────────────
   # Stilt G1 pelvis spawn height is 1.1843 m (see STILT_SPAWN_HEIGHT). With the
-  # ankle welded the stance is straighter than before — knee 0.30 rad cancelled
+  # ankle welded the stance is straighter than before — knee 0.10 rad cancelled
   # at the hip — so there is less pelvis drop available before the pose is
   # genuinely collapsed. A pelvis below 0.65 m means the stilts are near
   # horizontal. Keep this generous: an earlier 0.85 m threshold fired after 13

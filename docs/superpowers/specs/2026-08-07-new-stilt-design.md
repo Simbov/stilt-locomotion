@@ -304,5 +304,56 @@ all change. A fresh training run is required.
 2. Per-part material assignment, to refine per-segment COM.
 3. Whether mjwarp supports `force`/`torque` sensors — determines whether §8 sensors are
    added to the MJCF as a bonus.
-4. Keyframe knee angle — chosen during implementation to balance stance height against
-   ground clearance, under the `hip_pitch = −knee` constraint.
+4. Keyframe knee angle — **resolved: 0.10 rad.** Bounded by static stability, not
+   comfort. Under `hip_pitch = −knee`, bending the knee swings the pelvis backward while
+   the plate only reaches 70 mm behind the ankle, so 0.30 rad left the COM 17 mm from the
+   heel edge. 0.10 keeps ~58 mm of margin. Spawn height 1.1977 m.
+
+5. **Trainability is unresolved and is the open risk.** See §14.
+
+
+---
+
+## 14. Trainability — measured, unresolved
+
+Recorded 2026-08-07 after implementation, from a CPU smoke test (64 envs, 15
+iterations) plus a matched control run on the stock G1 velocity env.
+
+| | stilt env | stock G1 (control) |
+|---|---|---|
+| Mean episode length, iter 15 | **1.0 steps** | 53 steps |
+| `fell_over` per iteration | 60.5 | 1.8 |
+
+The stilt env collapses to terminating on the first step and stays there. This
+is not a smoke-test artifact — the control run under identical settings is
+stable.
+
+**Cause, established by measurement, is not a modelling bug:**
+
+- Statics closes (ground reaction within 0.1% of weight), the height-DR gate
+  passes, and all model tests are green.
+- Standing reward is *positive* and slightly better than stock
+  (+0.076 vs +0.069 per step), so termination is not trivially attractive.
+- Holding the default pose, the legs track their targets accurately (knee holds
+  0.100 rad on ~10 Nm of a 139 Nm budget) — the PD is not saturating.
+- Yet the robot topples as a rigid unit within ~4 s of simulated time.
+
+With the ankle welded the robot is an inverted pendulum on a rigid stick: it
+**cannot stand passively in any fixed pose** and must actively balance from the
+first step using hip and knee alone. Early in training every episode therefore
+ends in a fall, the fall penalties outweigh the brief positive standing reward,
+and instant termination becomes the locally optimal policy.
+
+This is §3.1's predicted difficulty showing up as a concrete training failure
+rather than merely slower convergence.
+
+**Before committing HPC time**, the following need trying — none are implemented:
+
+1. An explicit alive/survival bonus, so surviving strictly beats terminating.
+2. Softening or delaying `fell_over` / `torso_too_low` early in training, so the
+   policy gets enough episode length to discover balance at all.
+3. Re-validating at realistic scale (~4096 envs, several hundred iterations)
+   before drawing conclusions — 64 envs × 15 iterations is far too small to
+   call convergence, only to call the collapse.
+
+Until one of these lands, a long training run is likely to waste compute.

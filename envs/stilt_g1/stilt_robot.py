@@ -49,12 +49,25 @@ for _actuator in STILT_G1_ARTICULATION.actuators:
 # stilt is vertical only when hip_pitch == -knee. The old keyframe relied on
 # ankle_pitch=-0.363 to flatten the foot under a 0.669 knee bend; that is no
 # longer available, so the bend is shallower and exactly cancelled at the hip.
-STILT_KNEE_ANGLE = 0.30
+#
+# The angle is bounded by static stability, not comfort. Under the hip == -knee
+# constraint, bending the knee swings the pelvis BACKWARD, and the stilt plate
+# only reaches 70 mm behind the ankle. Whole-body COM x relative to the ankle:
+#
+#   knee 0.00 -> +0.009 m    knee 0.20 -> -0.032 m
+#   knee 0.10 -> -0.012 m    knee 0.30 -> -0.052 m  (17 mm from the heel edge)
+#   knee 0.15 -> -0.022 m    knee 0.40 -> -0.072 m  (outside the plate)
+#
+# 0.30 stood the robot on the back lip of its own support polygon: all ground
+# reaction landed on the heel capsule and PPO learned to terminate on step 1
+# rather than accumulate negative reward. 0.10 keeps ~58 mm of heel margin
+# while retaining some knee compliance.
+STILT_KNEE_ANGLE = 0.10
 
 # Pelvis height that rests both stilt plates on the floor at the keyframe pose.
 # Solved by scripts/solve_spawn_height.py — rerun it if STILT_KNEE_ANGLE or the
 # stilt geometry changes.
-STILT_SPAWN_HEIGHT = 1.1843
+STILT_SPAWN_HEIGHT = 1.1977
 
 # Nominal body_pos z of *_stilt_post_inner in the MJCF. dr.body_pos randomises
 # this field; envs/stilt_g1/events.py differences against this value to correct
