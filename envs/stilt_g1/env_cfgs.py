@@ -12,7 +12,12 @@ from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
-from mjlab.sensor import ObjRef, TerrainHeightSensorCfg
+from mjlab.sensor import (
+  ContactMatch,
+  ContactSensorCfg,
+  ObjRef,
+  TerrainHeightSensorCfg,
+)
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
 from .curriculums import stilt_height_curriculum, stilt_mass_curriculum
@@ -32,6 +37,9 @@ _STILT_GEOM_NAMES = tuple(
 )
 
 _STILT_SITE_NAMES = ("left_stilt_tip", "right_stilt_tip")
+
+# Name of the per-capsule ground-reaction sensor, read by the viewer load panel.
+STILT_CONTACT_SENSOR = "stilt_contact"
 
 # The five rigid segments per stilt, from the MJCF.
 _STILT_SEGMENTS = (
@@ -72,6 +80,24 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       sensor.frame = tuple(
         ObjRef(type="site", name=s, entity="robot") for s in _STILT_SITE_NAMES
       )
+
+  # Per-capsule ground reaction, for the load readout in the viewer. One column
+  # per capsule, net wrench in the global frame. mujoco_warp does not expose
+  # per-contact forces through get_data_into (geom ids come back as zeros), so
+  # this sensor is the supported way to get them.
+  cfg.scene.sensors = tuple(cfg.scene.sensors or ()) + (
+    ContactSensorCfg(
+      name=STILT_CONTACT_SENSOR,
+      primary=ContactMatch(
+        mode="geom",
+        pattern=(r"^(left|right)_stilt_[lr][1-4]_collision$",),
+        entity="robot",
+      ),
+      fields=("found", "force", "pos"),
+      reduce="netforce",
+      global_frame=True,
+    ),
+  )
 
   # ── Rewards ────────────────────────────────────────────────────────────────
   # foot_clearance and foot_slip use asset_cfg.site_names; foot_swing_height
