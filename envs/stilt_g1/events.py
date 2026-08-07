@@ -43,8 +43,15 @@ def reset_stilt_spawn_height(
 
   asset = env.scene[asset_cfg.name]
 
-  sampled_z = env.sim.model.body_pos[env_ids][:, asset_cfg.body_ids, 2]
-  correction = (nominal_z - sampled_z).mean(dim=1)
+  # asset_cfg.body_ids are entity-local, but sim.model.body_pos is indexed by
+  # global body id — map through the entity's indexing or the readback is zero.
+  body_ids = asset.indexing.body_ids[asset_cfg.body_ids]
+
+  # Correct for the LONGEST stilt (most negative z). With shared_random=True on
+  # the height term both stilts match, but taking the max keeps the robot clear
+  # of the floor even if they ever diverge.
+  sampled_z = env.sim.model.body_pos[env_ids][:, body_ids, 2]
+  correction = (nominal_z - sampled_z).max(dim=1).values
 
   pose = torch.cat(
     [
