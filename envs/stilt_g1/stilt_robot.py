@@ -25,7 +25,7 @@ def get_stilt_spec() -> mujoco.MjSpec:
 
 # The stilt's shank brace clamps the calf, so ankle pitch and roll are
 # mechanically locked and their joints are deleted from the MJCF. Drop
-# G1_ACTUATOR_ANKLE to match: action space 23 -> 19.
+# G1_ACTUATOR_ANKLE to match: action space 29 -> 25.
 STILT_G1_ARTICULATION = EntityArticulationInfoCfg(
   actuators=(
     G1_ACTUATOR_5020,

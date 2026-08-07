@@ -1,5 +1,28 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-07-23**
+**Last updated: 2026-08-07**
+
+---
+
+## ⚠️ New stilt design landed (2026-08-07) — Run 5 superseded
+
+The stilt was replaced with the real telescoping shank-clamped hardware
+(`Assembled 40.7cm.STL`): 407.5 mm tall, **2.8 kg per side**, five rigid
+segments with CAD-derived inertia, and a brace that **clamps the shank so the
+ankle joints are deleted** (action space **29 → 25**). Telescope height is now
+domain-randomised, and the viewer gained per-segment mass sliders plus section
+load and ground-pressure readouts.
+
+**Consequences:**
+- **The Run 5 checkpoint is invalid.** Different action space, mass, inertia,
+  height and stance. A fresh training run is required.
+- **`deploy/config/g1_stilt/deploy.yaml` is superseded** and must be regenerated
+  from the new ONNX metadata. Its arrays are still 29-DOF.
+- **Expect slower convergence than Run 5.** With the ankle welded there is no
+  ankle balance strategy at all — lateral balance is hip-roll only, and the
+  brace puts 1.0 kg above the ankle. This is genuine peg-stilt walking.
+
+Design and plan: `docs/superpowers/specs/2026-08-07-new-stilt-design.md`,
+`docs/superpowers/plans/2026-08-07-new-stilt-design.md`.
 
 ---
 
@@ -103,12 +126,38 @@ To revert to any tag: `git checkout <tag-name>`
 | stilt run 2 | 2026-03-27_12-43-32 | ~2000 | slipping | stilt slipping, friction not applied |
 | stilt run 3 | 2026-03-27_16-51-02 | short | abandoned | early test |
 | stilt run 4 | 2026-03-27_20-32-07 | 1499 | **broken** | 13-step episodes — torso_too_low threshold too high (0.85 m) |
-| **stilt run 5** | 2026-04-27_13-28-41 | 6000 | **running** | mjlab v1.3, stilt mass curriculum, 1.5 kg baseline |
+| stilt run 5 (false starts) | 2026-04-27_13-16→14-38 | 0 | aborted | several restarts, only `model_0` written |
+| **stilt run 5** | **2026-04-27_14-48-06** | **6000** | **✅ complete — robot walks** | mjlab v1.3, stilt mass curriculum, 1.5 kg baseline |
 
 **Run 5 setup:**
 - 4096 envs, H100, ~3700 steps/sec, 32 GB RAM
 - Warp kernels cached after first iteration (no recompile overhead)
 - W&B: https://wandb.ai/<wandb-entity>/stilt-locomotion/runs/<run-id>
+
+**Run 5 results (from `events.out.tfevents` — verified 2026-07-23):**
+
+The full 6000-iteration run **converged to a stable walking gait.** Phase 1 (get the
+robot walking) is complete.
+
+| Metric | Start | ~iter 1k | ~iter 3k | Final (6k) |
+|---|---|---|---|---|
+| `Train/mean_episode_length` | 12.9 | 921 | 998 | **985** |
+| `Episode_Reward/track_linear_velocity` | 0.00 | 1.04 | 1.47 | **1.31** |
+| `Episode_Termination/fell_over` | 0 | 0.54 | 0 | **0** |
+| `Episode_Termination/time_out` | 4.2 | 3.9 | 4.0 | **4.75** |
+| `Episode_Termination/torso_too_low` | 0 | 0.29 | 0.04 | 0.21 |
+| `Metrics/slip_velocity_mean` | 0.52 | 0.24 | 0.16 | **0.21** |
+| `Curriculum/stilt_mass/…_max_kg` | 1.5 | 3.3 | 6.0 | **6.0** |
+
+- Episode length jumped from the 13-step collapse (run 4) to ~985 steps — episodes now
+  end almost entirely by `time_out`, i.e. the robot survives the full episode.
+- Velocity tracking blew past the >0.5-by-3k target (hit 1.47).
+- **Stilt mass robustness (answers Phase 2):** the policy stayed stable across the full
+  curriculum sweep to **0.5–6.0 kg per stilt** without falls — up to 4× the 1.5 kg baseline.
+- ⚠️ `Train/mean_reward` peaked ~49 near iter 3k and settled to ~33 by the end (mild
+  late-training decline as the mass range widened); episode length held at ~985, so the
+  gait is stable, not collapsing. Candidate for a shorter/gentler final curriculum stage.
+- Deployable checkpoint: `model_5999.pt` + `2026-04-27_14-48-06.onnx`.
 
 ---
 

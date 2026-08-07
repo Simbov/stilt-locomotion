@@ -416,3 +416,27 @@ for p in m.metadata_props:
 | `--help` causes abort | Known quirk — the help flag works but then aborts | Ignore the abort, read the output |
 | Clock skew warnings in make | Robot clock set to 1970 | Harmless — binary is valid |
 | Policy not loading | Wrong `policy_dir` in `config.yaml` | Check with `grep policy_dir config.yaml` |
+
+---
+
+## Ankle handling (stilt hardware)
+
+**Applies from the telescoping shank-clamped stilt onwards (2026-08-07).**
+
+The stilt's brace clamps the shank, so ankle pitch and roll are mechanically
+locked. The joints are deleted from the sim model and the policy does not
+command them — **the action vector is 25, not 29.**
+
+**The four ankle motors must be left in damping mode, not PD position mode.**
+PD-tracking a position target into a rigid clamp makes the motors fight the
+structure and overheat. Set them to zero stiffness with non-zero damping in the
+runtime config before running `./g1_ctrl`.
+
+The affected joints, in the original 29-DOF ordering, are indices **4, 5, 10,
+11** (`left_ankle_pitch`, `left_ankle_roll`, `right_ankle_pitch`,
+`right_ankle_roll`). They are absent from the new policy's joint list, so
+`joint_ids_map` must skip them and the runtime must drive them separately.
+
+> `deploy/config/g1_stilt/deploy.yaml` is currently **superseded** — it still
+> holds Run 5's 29-DOF arrays. Regenerate it from the new ONNX metadata after
+> retraining; do not hand-edit it.
