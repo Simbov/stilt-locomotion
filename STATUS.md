@@ -21,6 +21,12 @@ load and ground-pressure readouts.
   ankle balance strategy at all — lateral balance is hip-roll only, and the
   brace puts 1.0 kg above the ankle. This is genuine peg-stilt walking.
 
+**Trainability verified (2026-08-07).** A 64-env CPU smoke run reaches mean
+episode length ~80 and holds, against ~53 for a matched stock-G1 control. An
+earlier apparent training collapse was traced to a stale-read bug in
+`reset_stilt_spawn_height`, not to the task — see spec §14. No reward shaping
+is used. **Ready for an HPC run.**
+
 Design and plan: `docs/superpowers/specs/2026-08-07-new-stilt-design.md`,
 `docs/superpowers/plans/2026-08-07-new-stilt-design.md`.
 

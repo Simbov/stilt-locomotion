@@ -314,46 +314,67 @@ all change. A fresh training run is required.
 
 ---
 
-## 14. Trainability — measured, unresolved
+## 14. Trainability — resolved
 
-Recorded 2026-08-07 after implementation, from a CPU smoke test (64 envs, 15
-iterations) plus a matched control run on the stock G1 velocity env.
+Recorded 2026-08-07. **The earlier version of this section was wrong** and is
+replaced. It concluded the task was fundamentally hard to train because the
+robot cannot stand passively with the ankle welded. That reasoning was
+plausible and the supporting measurements were real, but the actual cause of
+the failure was a bug in this project's own reset code.
 
-| | stilt env | stock G1 (control) |
-|---|---|---|
-| Mean episode length, iter 15 | **1.0 steps** | 53 steps |
-| `fell_over` per iteration | 60.5 | 1.8 |
+### The bug
 
-The stilt env collapses to terminating on the first step and stays there. This
-is not a smoke-test artifact — the control run under identical settings is
-stable.
+`reset_stilt_spawn_height` read the root pose from
+`asset.data.root_link_pos_w`, added the telescope correction, and wrote the
+result back. That view is **cached and stale** at this point in the reset:
+`reset_base` had already written the fresh spawn pose straight to the sim
+without invalidating it, so the read returned the *previous episode's* pose.
+Writing it back silently undid the entire reset.
 
-**Cause, established by measurement, is not a modelling bug:**
+The first reset of a fresh env looked correct, which is why it passed every
+earlier check — including the §6 height-DR gate, which only ever resets once.
+From the second episode onward the robot spawned in whatever fallen pose it
+had died in, and terminated immediately.
 
-- Statics closes (ground reaction within 0.1% of weight), the height-DR gate
-  passes, and all model tests are green.
-- Standing reward is *positive* and slightly better than stock
-  (+0.076 vs +0.069 per step), so termination is not trivially attractive.
-- Holding the default pose, the legs track their targets accurately (knee holds
-  0.100 rad on ~10 Nm of a 139 Nm budget) — the PD is not saturating.
-- Yet the robot topples as a rigid unit within ~4 s of simulated time.
+Symptoms this explains, all of which were misread as a learning failure:
 
-With the ankle welded the robot is an inverted pendulum on a rigid stick: it
-**cannot stand passively in any fixed pose** and must actively balance from the
-first step using hip and knee alone. Early in training every episode therefore
-ends in a fall, the fall penalties outweigh the brief positive standing reward,
-and instant termination becomes the locally optimal policy.
+- Mean episode length pinned at exactly 1.0
+- `alive` reward logging exactly 0.0000 (every episode was one terminal step)
+- Both terminations firing on step 1 even at a 90° tilt limit and a 0.40 m
+  floor — impossible in one 20 ms step from a standing start, and the tell that
+  should have been followed sooner
+- A post-collapse rollout starting at pelvis 0.436 m and 102.8° of tilt
 
-This is §3.1's predicted difficulty showing up as a concrete training failure
-rather than merely slower convergence.
+### Fix
 
-**Before committing HPC time**, the following need trying — none are implemented:
+Apply the correction as an in-place delta to the authoritative sim state
+(`env.sim.data.qpos[env_ids, root_z_adr] += correction`) instead of
+round-tripping a pose through the cached view.
 
-1. An explicit alive/survival bonus, so surviving strictly beats terminating.
-2. Softening or delaying `fell_over` / `torso_too_low` early in training, so the
-   policy gets enough episode length to discover balance at all.
-3. Re-validating at realistic scale (~4096 envs, several hundred iterations)
-   before drawing conclusions — 64 envs × 15 iterations is far too small to
-   call convergence, only to call the collapse.
+Covered by `tests/test_stilt_reset.py`, which was confirmed to fail when the
+bug is reintroduced and pass when it is fixed.
 
-Until one of these lands, a long training run is likely to waste compute.
+### Result
+
+64 envs, 15 iterations, CPU, against a matched stock-G1 control:
+
+| | before fix | after fix | stock G1 control |
+|---|---|---|---|
+| Mean episode length | 1.0 | **~80** | ~53 |
+
+Episode length climbs 9 → 62 → 76 → 83 and holds. No reward shaping is used:
+an ablation showed `alive`/`terminated` terms are unnecessary once the reset is
+correct (~75 with them, ~78-80 without), and an `alive` bonus large enough to
+matter would outweigh the velocity-tracking reward and bias the policy toward
+standing still.
+
+`stilt_termination_curriculum` is retained — it loosens the fall thresholds
+early and tightens to the stock values by iteration 1500, so it can only affect
+early exploration, never the converged policy.
+
+### Standing caveat
+
+§3.1 still holds on its own terms: with the ankle welded there is no ankle
+balance strategy, and the robot genuinely cannot stand passively in a fixed
+pose. Expect this to be harder than Run 5 and to need more iterations. That is
+a real property of the hardware — it just was not what caused the collapse.

@@ -53,12 +53,13 @@ def reset_stilt_spawn_height(
   sampled_z = env.sim.model.body_pos[env_ids][:, body_ids, 2]
   correction = (nominal_z - sampled_z).max(dim=1).values
 
-  pose = torch.cat(
-    [
-      asset.data.root_link_pos_w[env_ids].clone(),
-      asset.data.root_link_quat_w[env_ids].clone(),
-    ],
-    dim=-1,
-  )
-  pose[:, 2] += correction
-  asset.write_root_link_pose_to_sim(pose, env_ids=env_ids)
+  # Apply the correction as an in-place delta on the authoritative sim state.
+  #
+  # Do NOT read asset.data.root_link_pos_w here and write it back: that view is
+  # cached and still holds the PREVIOUS episode's pose at this point in the
+  # reset, because `reset_base` wrote the fresh pose straight to the sim without
+  # invalidating it. Round-tripping through it silently restores the fallen pose
+  # and every episode after the first one spawns already collapsed.
+  # free_joint_q_adr is the 7 addresses [x, y, z, qw, qx, qy, qz].
+  root_z_adr = int(asset.indexing.free_joint_q_adr[2])
+  env.sim.data.qpos[env_ids, root_z_adr] += correction

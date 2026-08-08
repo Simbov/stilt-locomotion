@@ -128,3 +128,50 @@ class stilt_height_curriculum:
       "stilt_height_min_m": torch.tensor(self.NOMINAL_HEIGHT_M - hi),
       "stilt_height_max_m": torch.tensor(self.NOMINAL_HEIGHT_M - lo),
     }
+
+
+class stilt_termination_curriculum:
+  """Loosen the fall terminations early, then tighten to their final values.
+
+  With the ankle welded the robot cannot stand passively, so early in training
+  every episode ends in a fall. Terminating at the final thresholds from step
+  zero gives episodes too short to discover balance at all — the policy learns
+  to fall immediately instead. Starting permissive buys the episode length
+  needed to stumble and recover, then tightens back to the real limits.
+
+  Stages define ``step`` thresholds plus the target ``limit_angle`` (rad, for
+  ``fell_over``) and ``minimum_height`` (m, for ``torso_too_low``).
+  """
+
+  def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
+    self._stages: list[dict] = cfg.params["stages"]
+    self._fell_over = env.termination_manager.get_term_cfg("fell_over")
+    self._torso_too_low = env.termination_manager.get_term_cfg("torso_too_low")
+
+    steps = [s["step"] for s in self._stages]
+    if steps != sorted(steps):
+      raise ValueError(
+        f"stilt_termination_curriculum stages must be in nondecreasing step "
+        f"order, got {steps}."
+      )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    stages: list[dict],
+  ) -> dict[str, torch.Tensor]:
+    del env_ids, stages
+
+    active = self._stages[0]
+    for stage in self._stages:
+      if env.common_step_counter >= stage["step"]:
+        active = stage
+
+    self._fell_over.params["limit_angle"] = active["limit_angle"]
+    self._torso_too_low.params["minimum_height"] = active["minimum_height"]
+
+    return {
+      "fell_over_limit_angle_rad": torch.tensor(active["limit_angle"]),
+      "torso_min_height_m": torch.tensor(active["minimum_height"]),
+    }

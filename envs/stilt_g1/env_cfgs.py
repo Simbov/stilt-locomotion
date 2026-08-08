@@ -20,7 +20,11 @@ from mjlab.sensor import (
 )
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
-from .curriculums import stilt_height_curriculum, stilt_mass_curriculum
+from .curriculums import (
+  stilt_height_curriculum,
+  stilt_mass_curriculum,
+  stilt_termination_curriculum,
+)
 from .events import reset_stilt_spawn_height
 from .stilt_robot import (
   STILT_G1_ACTION_SCALE,
@@ -120,6 +124,17 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     for pattern in [k for k in stds if "ankle" in k]:
       del stds[pattern]
 
+  # NOTE: no `alive` / `terminated` survival shaping here, deliberately.
+  # Episodes once collapsed to a single step, which looked like the classic
+  # "dying is cheaper than trying" failure — but the real cause was a stale-read
+  # bug in reset_stilt_spawn_height (see envs/stilt_g1/events.py), which spawned
+  # every episode after the first in the previous episode's fallen pose. With
+  # that fixed, an ablation at 64 envs / 15 iterations showed survival shaping
+  # is not needed: episode length reaches ~75 with it and ~78-80 without.
+  # An `alive` bonus large enough to matter (+0.04/step) would also outweigh the
+  # velocity tracking reward (+0.012/step) and bias the policy toward standing
+  # still, so it stays out.
+
   # ── Domain randomisation ───────────────────────────────────────────────────
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = _STILT_GEOM_NAMES
 
@@ -197,6 +212,21 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           {"step": 1500 * 24, "offset_range": (-0.050, 0.050)},
           # The full mechanical range (352–522 mm) is gated on confirming the
           # minimum safe tube overlap — do not widen past ±50 mm until then.
+        ],
+      },
+    )
+
+    # Start permissive so early episodes are long enough to discover balance,
+    # then tighten to the real limits. Final values match the stock G1
+    # fell_over angle (1.2217 rad = 70°) and our torso_too_low floor (0.65 m).
+    cfg.curriculum["stilt_termination"] = CurriculumTermCfg(
+      func=stilt_termination_curriculum,
+      params={
+        "stages": [
+          {"step": 0, "limit_angle": 1.5708, "minimum_height": 0.40},
+          {"step": 300 * 24, "limit_angle": 1.4000, "minimum_height": 0.50},
+          {"step": 800 * 24, "limit_angle": 1.3000, "minimum_height": 0.58},
+          {"step": 1500 * 24, "limit_angle": 1.2217, "minimum_height": 0.65},
         ],
       },
     )
