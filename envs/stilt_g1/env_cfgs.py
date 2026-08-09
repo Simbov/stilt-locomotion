@@ -113,8 +113,22 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["foot_clearance"].params["target_height"] = 0.10
   cfg.rewards["foot_swing_height"].params["target_height"] = 0.10
 
-  # Keep air-time disabled initially — same as stock G1, enable once walking
-  cfg.rewards["air_time"].weight = 0.0
+  # Air time: pay for actually picking a stilt up. Off in stock G1 (weight 0.0)
+  # and left off through Run 6, which balanced well but converged to a single
+  # ~0.35 m/s shuffle — nothing in the reward paid for taking a step.
+  #
+  # feet_air_time counts feet whose air time is in [0.05, 0.5] s, so it maxes at
+  # 2. Rewards are dt-scaled (0.02), giving 0.04 * weight per step; at 0.5 that
+  # is half the 0.04/step available from track_linear_velocity (weight 2.0).
+  # This is the main knob to tune if the gait comes out too hoppy or too flat.
+  #
+  # The sensor is a SUBTREE match on ankle_roll_link, so it picks up the stilt
+  # capsules rather than the disabled original foot geoms — verified reporting
+  # 10-16 contacts against terrain in the stilt env.
+  cfg.rewards["air_time"].weight = 0.5
+  # Default 0.5 would only reward stepping above half the capped command range;
+  # 0.3 keeps it active across most of it.
+  cfg.rewards["air_time"].params["command_threshold"] = 0.3
 
   # The stock G1 pose reward keys per-joint std on regexes that include the
   # ankles. Those joints no longer exist, and mjlab raises if a regex matches
@@ -179,6 +193,35 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # ── Curricula ──────────────────────────────────────────────────────────────
   if not play:
+    # Cap commanded velocity near what the hardware can actually do. Stock G1
+    # ramps to lin_vel_x (-2.0, 3.0); Run 6 inherited (-1.5, 2.0) and spent most
+    # of training on commands it could not meet, achieving ~0.35 m/s and simply
+    # freezing above ~0.7. Capping at 0.8 keeps headroom above the current gait
+    # without training against impossible targets.
+    #
+    # Yaw starts tighter than stock too: Run 6 produced ~0.005 rad/s for any yaw
+    # command, so it needs an easier target to get any gradient at all.
+    cfg.curriculum["command_vel"].params["velocity_stages"] = [
+      {
+        "step": 0,
+        "lin_vel_x": (-0.3, 0.5),
+        "lin_vel_y": (-0.3, 0.3),
+        "ang_vel_z": (-0.3, 0.3),
+      },
+      {
+        "step": 1000 * 24,
+        "lin_vel_x": (-0.5, 0.7),
+        "lin_vel_y": (-0.4, 0.4),
+        "ang_vel_z": (-0.5, 0.5),
+      },
+      {
+        "step": 3000 * 24,
+        "lin_vel_x": (-0.6, 0.8),
+        "lin_vel_y": (-0.5, 0.5),
+        "ang_vel_z": (-0.6, 0.6),
+      },
+    ]
+
     cfg.curriculum["stilt_mass"] = CurriculumTermCfg(
       func=stilt_mass_curriculum,
       params={

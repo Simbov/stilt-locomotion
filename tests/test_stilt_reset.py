@@ -28,21 +28,38 @@ def _pelvis_height(env):
   return (robot.data.root_link_pos_w[:, 2] - env.scene.env_origins[:, 2]).mean().item()
 
 
-def test_reset_restores_spawn_height_after_a_fall(env):
+FALLEN_HEIGHT = 0.40
+
+
+def test_reset_restores_spawn_height_from_an_arbitrary_pose(env):
+  """Reset must recover the spawn pose from wherever the robot happened to be.
+
+  The robot is *placed* in a fallen pose rather than knocked over with random
+  actions. An earlier version did the latter and flaked: how far it falls in a
+  fixed number of steps depends on the RNG state left by whichever tests ran
+  first, and it sometimes stayed upright, making the test vacuous. Placing the
+  pose directly tests the same invariant deterministically — the bug was that
+  reset read a *cached* pose, so any non-spawn starting pose reproduces it.
+  """
   env.reset()
   assert _pelvis_height(env) == pytest.approx(STILT_SPAWN_HEIGHT, abs=0.06)
 
-  # Knock the robot over, confirm it actually fell, then reset again.
-  dim = env.action_manager.total_action_dim
+  robot = env.scene["robot"]
   with torch.inference_mode():
-    for _ in range(120):
-      env.step(torch.randn(env.num_envs, dim) * 2.0)
-    fallen = _pelvis_height(env)
+    pose = torch.cat(
+      [robot.data.root_link_pos_w.clone(), robot.data.root_link_quat_w.clone()],
+      dim=-1,
+    )
+    pose[:, 2] = env.scene.env_origins[:, 2] + FALLEN_HEIGHT
+    robot.write_root_link_pose_to_sim(pose)
+    env.sim.forward()
+
+    displaced = _pelvis_height(env)
     env.reset()
     after = _pelvis_height(env)
 
-  assert fallen < STILT_SPAWN_HEIGHT - 0.05, (
-    f"robot did not fall, test is vacuous: {fallen:.3f} m"
+  assert displaced == pytest.approx(FALLEN_HEIGHT, abs=0.05), (
+    f"setup failed, robot was not displaced: {displaced:.3f} m"
   )
   assert after == pytest.approx(STILT_SPAWN_HEIGHT, abs=0.06), (
     f"reset left the robot at {after:.3f} m, expected ~{STILT_SPAWN_HEIGHT:.3f} m"
