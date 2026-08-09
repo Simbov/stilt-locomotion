@@ -32,6 +32,55 @@ Design and plan: `docs/superpowers/specs/2026-08-07-new-stilt-design.md`,
 
 ---
 
+## Run 6 result (2026-08-08_10-46-51) — balances, walks slowly, cannot turn
+
+First run on the new telescoping stilt. 6000 iterations, 4096 envs, ~2h22m.
+ONNX exported. **Balance is solved; velocity tracking is not.**
+
+| | Run 5 (old stilt, free ankles) | Run 6 (new stilt, welded ankles) |
+|---|---|---|
+| Mean episode length | 984.6 | **983.2** (of 1000) |
+| Mean reward | 33.4 | 32.1 |
+| `fell_over` | 0.00 | **0.00** |
+| `error_vel_xy` | 0.84 | 1.80 |
+
+All curricula completed: mass 0.93–7.61 kg, height 358–458 mm, terminations
+tightened to the stock 1.222 rad / 0.65 m, commands widened to ±2.0 m/s.
+
+**What it does**, measured by driving the checkpoint with fixed commands:
+
+| commanded vx | achieved vx |
+|---|---|
+| 0.25 | 0.06 |
+| 0.40 | 0.33 |
+| 0.50 | 0.36 |
+| 0.60 | 0.36 |
+| 0.75 | 0.05 |
+| 1.00 | 0.00 |
+
+- Stands still perfectly on zero command, and never falls.
+- Walks forward at ~0.35 m/s for commands in 0.4–0.6, and strafes at ~0.38.
+- **Freezes above ~0.7 m/s** — a discrete cutoff, not a gradual degradation.
+- **Cannot turn**: yaw rate is ~0.005 rad/s for commands of 0.2, 0.35 and 0.7.
+- Backward is weak (0.12 achieved for 0.5 commanded).
+
+The aggregate `error_vel_xy` of 1.80 is worse than standing perfectly still
+(1.09) purely because the command curriculum reached ±2.0 m/s while the policy
+only covers a narrow low-speed band and freezes elsewhere.
+
+**Next levers, in order:**
+
+1. **Enable `air_time`** — still at weight 0.0 in `env_cfgs.py` ("disabled until
+   the robot can walk"). It can now balance, so this is the obvious next step;
+   nothing currently rewards taking a proper step.
+2. **Cap the command curriculum near what is achievable** (~0.6–0.8 m/s) instead
+   of 2.0. Training against commands it cannot meet likely drives the freeze.
+3. **Yaw needs separate attention.** Run 5 tracked yaw poorly too, so this is a
+   pre-existing weakness rather than a stilt regression, but with the ankle
+   welded there is even less authority to turn with.
+
+---
+
 ## Deployment Infrastructure (`deploy/`)
 
 Hardware deployment config is ready for when Run 5 produces a good checkpoint.
