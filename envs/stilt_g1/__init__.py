@@ -185,6 +185,10 @@ def _stilt_mass_play_gui(server: viser.ViserServer, env: EnvProtocol) -> None:
     def _(_) -> None:
       _apply_all()
 
+    # Populate the readback immediately; otherwise it reads "sim mass: —" until
+    # the first slider move, which looks like the panel is broken.
+    _refresh_readback()
+
   # --- Stilt section loads ---
   with server.gui.add_folder("Stilt Loads"):
     server.gui.add_markdown(
