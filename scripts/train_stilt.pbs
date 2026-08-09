@@ -17,10 +17,22 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
+# Run 7: from scratch (no --agent.resume; it defaults to False).
+#
+# Changed vs Run 6, which balanced well (983/1000 steps, zero falls) but
+# converged to a single ~0.35 m/s gait, froze above ~0.7 m/s and could not turn:
+#   * air_time reward 0.0 -> 0.5, command_threshold 0.5 -> 0.3
+#   * command curriculum capped at 0.8 m/s forward instead of ramping to 2.0
+# Both live in envs/stilt_g1/env_cfgs.py, not here.
+#
+# From scratch rather than resuming Run 6: adding a reward term invalidates the
+# critic, and Run 6 sat in a degenerate local optimum that fine-tuning would
+# likely preserve.
 export CUDA_VISIBLE_DEVICES=0
 uv run python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 6000 \
+    --agent.run-name run7-airtime-cappedcmd \
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
     --agent.upload-model False \
