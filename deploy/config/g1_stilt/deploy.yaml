@@ -1,162 +1,133 @@
 # ============================================================================
-# SUPERSEDED — DO NOT DEPLOY AS-IS.  (last reviewed 2026-08-13)
+# Deployment config for the Stilt G1 velocity policy.
 #
-# Every value below was generated from the Run 5 ONNX metadata
-# (2026-04-27_14-48-06), which was trained against the OLD single-box stilt.
-# Three later changes each invalidate it on their own:
+# GENERATED — do not hand-edit. Regenerate with:
+#   uv run python scripts/generate_deploy_config.py --run logs/rsl_rl/stilt_g1_velocity/2026-08-13_20-35-42_run8-stilts-on-off
 #
-#   * Stilt mass is 2.8 kg per side, not 1.5 kg, with real segment inertia,
-#     and the telescope height is randomised.
-#   * The policy now takes 5 FRAMES of observation history — 495 inputs, not
-#     99 — because it must infer from the dynamics whether the stilts are
-#     fitted. The runtime has to buffer and flatten that history.
-#   * The standing pose is now hip_pitch -0.10 / knee 0.10 / ankle 0 — shank
-#     vertical, the only pose the assembled stilt stands upright in. It is the
-#     same with the stilts off, so default_joint_pos below is wrong for the legs.
+# Source: 2026-08-13_20-35-42_run8-stilts-on-off
+# Policy: 495 inputs -> 29 actions
 #
-# The joint ordering and the 29-DOF action vector below are still correct —
-# the robot is always the stock 29-DoF G1. (An earlier revision of this header
-# claimed the ankle joints were deleted and the action vector was 25. That was
-# never the hardware; Runs 6 and 7 were trained on that mistake and are void.)
+# ONE POLICY, TWO MORPHOLOGIES. This config is correct with the stilts bolted
+# on and with them removed. The policy is not told which — it infers it from
+# 5 frames of observation history. There is no mode switch to set, and
+# nothing in this file changes between the two.
 #
-# This file must be regenerated wholesale from the Run 8 ONNX metadata — the PD
-# gains, action scales and offsets are all read out of the trained policy and
-# cannot be hand-derived. Nothing here has been edited to "look right", because
-# a plausible-but-wrong deployment config is worse than an obviously stale one.
-#
-# See also deploy/README.md § "Ankle handling (stilt hardware)": the ankle
-# motors stay in normal PD position mode.
+# The four ankle motors stay in NORMAL PD POSITION MODE in both cases. Do not
+# put them in damping mode; the policy is trained to drive them into the
+# brace's stiffness and is counting on that authority.
 # ============================================================================
 #
-# Deployment config for Stilt G1 velocity policy
-# Generated from ONNX metadata: logs/rsl_rl/stilt_g1_velocity/2026-04-27_14-48-06/
+# OBSERVATION LAYOUT — 495 inputs. Read this carefully.
 #
-# Observation vector (99-dim, order must match training exactly):
-#   [0:3]   base_lin_vel        — !! requires state estimator or zero-fill (see README)
-#   [3:6]   base_ang_vel        — from IMU gyroscope
-#   [6:9]   projected_gravity   — from IMU quaternion
-#   [9:38]  joint_pos_rel       — encoder positions minus default_joint_pos
-#   [38:67] joint_vel_rel       — encoder velocities
-#   [67:96] last_action         — previous policy output (raw, before scale/offset)
-#   [96:99] velocity_commands   — vx, vy, yaw from joystick (twist command)
+# The vector is NOT 5 stacked frames of the full observation. Each term
+# contributes ALL 5 of its frames contiguously, oldest first, in this
+# order:
+#
+#   [0:15]      base_lin_vel         5 frames x 3
+#   [15:30]     base_ang_vel         5 frames x 3
+#   [30:45]     projected_gravity    5 frames x 3
+#   [45:190]    joint_pos_rel        5 frames x 29
+#   [190:335]   joint_vel_rel        5 frames x 29
+#   [335:480]   last_action          5 frames x 29
+#   [480:495]   velocity_commands    5 frames x 3
+#
+# Within each block index 0 is the OLDEST frame. Getting this wrong produces a
+# policy that loads, runs, and walks badly. Validate against reference_io.json
+# before putting the robot on the ground.
 
 step_dt: 0.02  # 50 Hz control loop
 
-# G1 29-DOF joint ordering (matches training joint_names in ONNX metadata):
-#   0  left_hip_pitch      6  right_hip_pitch    12 waist_yaw
-#   1  left_hip_roll       7  right_hip_roll     13 waist_roll
-#   2  left_hip_yaw        8  right_hip_yaw      14 waist_pitch
-#   3  left_knee           9  right_knee         15 left_shoulder_pitch
-#   4  left_ankle_pitch   10  right_ankle_pitch  16 left_shoulder_roll
-#   5  left_ankle_roll    11  right_ankle_roll   17 left_shoulder_yaw
-#                                                18 left_elbow
-#                                                19 left_wrist_roll
-#                                                20 left_wrist_pitch
-#                                                21 left_wrist_yaw
-#                                                22 right_shoulder_pitch
-#                                                23 right_shoulder_roll
-#                                                24 right_shoulder_yaw
-#                                                25 right_elbow
-#                                                26 right_wrist_roll
-#                                                27 right_wrist_pitch
-#                                                28 right_wrist_yaw
+# G1 29-DOF joint ordering, from the ONNX joint_names metadata.
 joint_ids_map: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28]
 
-# Standing pose used for initialisation and as action offset (from ONNX metadata)
-default_joint_pos: [-0.312, 0.000, 0.000,  0.669, -0.363, 0.000,
-                    -0.312, 0.000, 0.000,  0.669, -0.363, 0.000,
-                     0.000, 0.000, 0.000,
-                     0.200, 0.200, 0.000,  0.600, 0.000, 0.000, 0.000,
-                     0.200,-0.200, 0.000,  0.600, 0.000, 0.000, 0.000]
+# Standing pose. Shank vertical with the ankle at the stilt brace's neutral
+# angle — the only pose the assembled stilt stands upright in, and shared with
+# the bare robot so the neutral action means the same thing in both.
+default_joint_pos: [
+   -0.100,   0.000,   0.000,   0.100,   0.000,   0.000,  # left_hip
+   -0.100,   0.000,   0.000,   0.100,   0.000,   0.000,  # right_hip
+    0.000,   0.000,   0.000,  # waist
+    0.200,   0.200,   0.000,   0.600,   0.000,   0.000,   0.000,  # left_shoulder
+    0.200,  -0.200,   0.000,   0.600,   0.000,   0.000,   0.000  # right_shoulder
+]
 
-# PD gains (from ONNX metadata — match training exactly)
-stiffness: [40.179, 99.098, 40.179, 99.098, 28.501, 28.501,
-            40.179, 99.098, 40.179, 99.098, 28.501, 28.501,
-            40.179, 28.501, 28.501,
-            14.251, 14.251, 14.251, 14.251, 14.251, 16.778, 16.778,
-            14.251, 14.251, 14.251, 14.251, 14.251, 16.778, 16.778]
+# PD gains — must match training exactly.
+stiffness: [
+   40.179,  99.098,  40.179,  99.098,  28.501,  28.501,  # left_hip
+   40.179,  99.098,  40.179,  99.098,  28.501,  28.501,  # right_hip
+   40.179,  28.501,  28.501,  # waist
+   14.251,  14.251,  14.251,  14.251,  14.251,  16.778,  16.778,  # left_shoulder
+   14.251,  14.251,  14.251,  14.251,  14.251,  16.778,  16.778  # right_shoulder
+]
 
-damping:   [2.558, 6.309, 2.558, 6.309, 1.814, 1.814,
-            2.558, 6.309, 2.558, 6.309, 1.814, 1.814,
-            2.558, 1.814, 1.814,
-            0.907, 0.907, 0.907, 0.907, 0.907, 1.068, 1.068,
-            0.907, 0.907, 0.907, 0.907, 0.907, 1.068, 1.068]
+damping: [
+    2.558,   6.309,   2.558,   6.309,   1.814,   1.814,  # left_hip
+    2.558,   6.309,   2.558,   6.309,   1.814,   1.814,  # right_hip
+    2.558,   1.814,   1.814,  # waist
+    0.907,   0.907,   0.907,   0.907,   0.907,   1.068,   1.068,  # left_shoulder
+    0.907,   0.907,   0.907,   0.907,   0.907,   1.068,   1.068  # right_shoulder
+]
 
+# Capped at what the policy was actually trained on (the final command
+# curriculum stage). Commanding beyond this is extrapolation: the policy
+# saturates rather than tracking, and it was never rewarded for trying.
 commands:
   twist:
     ranges:
-      lin_vel_x:  [-0.5, 1.0]
+      lin_vel_x:  [-0.6, 0.8]
       lin_vel_y:  [-0.5, 0.5]
-      ang_vel_z:  [-1.0, 1.0]
+      ang_vel_z:  [-0.6, 0.6]
 
 actions:
   JointPositionAction:
     joint_names: [".*"]
-    # Policy outputs raw deltas; final target = (output * scale) + offset
-    # scale and offset are per-joint (from ONNX metadata)
-    scale:  [0.548, 0.351, 0.548, 0.351, 0.439, 0.439,
-             0.548, 0.351, 0.548, 0.351, 0.439, 0.439,
-             0.548, 0.439, 0.439,
-             0.439, 0.439, 0.439, 0.439, 0.439, 0.075, 0.075,
-             0.439, 0.439, 0.439, 0.439, 0.439, 0.075, 0.075]
-    offset: [-0.312, 0.000, 0.000,  0.669, -0.363, 0.000,
-             -0.312, 0.000, 0.000,  0.669, -0.363, 0.000,
-              0.000, 0.000, 0.000,
-              0.200, 0.200, 0.000,  0.600, 0.000, 0.000, 0.000,
-              0.200,-0.200, 0.000,  0.600, 0.000, 0.000, 0.000]
+    # Final target = (raw policy output * scale) + offset.
+    scale: [
+        0.548,   0.351,   0.548,   0.351,   0.439,   0.439,  # left_hip
+        0.548,   0.351,   0.548,   0.351,   0.439,   0.439,  # right_hip
+        0.548,   0.439,   0.439,  # waist
+        0.439,   0.439,   0.439,   0.439,   0.439,   0.075,   0.075,  # left_shoulder
+        0.439,   0.439,   0.439,   0.439,   0.439,   0.075,   0.075  # right_shoulder
+    ]
+    offset: [
+       -0.100,   0.000,   0.000,   0.100,   0.000,   0.000,  # left_hip
+       -0.100,   0.000,   0.000,   0.100,   0.000,   0.000,  # right_hip
+        0.000,   0.000,   0.000,  # waist
+        0.200,   0.200,   0.000,   0.600,   0.000,   0.000,   0.000,  # left_shoulder
+        0.200,  -0.200,   0.000,   0.600,   0.000,   0.000,   0.000  # right_shoulder
+    ]
     clip: null
 
-# Observations — ORDER HERE DEFINES THE OBS VECTOR ORDER.
-# Must match training exactly. Obs normalisation is baked into the ONNX,
-# so all scales are 1.0 (do NOT add extra scaling here).
+# Observation normalisation is baked into the ONNX, so every scale is 1.0.
+# Do NOT add extra scaling here.
 observations:
-  # [0:3] — linear velocity in body frame
-  # unitree_rl_mjlab registers this as "base_lin_vel"; it reads from the
-  # robot's onboard velocity estimator. If that term is unavailable,
-  # register a zero-fill stub (see README §Obs term: base_lin_vel).
+  # [0:15] — linear velocity in body frame. Requires the onboard estimator; if that
+  # term is unavailable, register a zero-fill stub (see README).
   base_lin_vel:
     scale: [1.0, 1.0, 1.0]
-    history_length: 1
-
-  # [3:6] — angular velocity from IMU gyroscope
+    history_length: 5
+  # [15:30] — angular velocity from the IMU gyroscope.
   base_ang_vel:
     scale: [1.0, 1.0, 1.0]
-    history_length: 1
-
-  # [6:9] — gravity vector projected into body frame (from IMU quaternion)
+    history_length: 5
+  # [30:45] — gravity projected into the body frame, from the IMU quaternion.
   projected_gravity:
     scale: [1.0, 1.0, 1.0]
-    history_length: 1
-
-  # [9:38] — joint positions relative to default_joint_pos
+    history_length: 5
+  # [45:190] — encoder positions MINUS default_joint_pos.
   joint_pos_rel:
-    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    history_length: 1
-
-  # [38:67] — joint velocities
+    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    history_length: 5
+  # [190:335] — encoder velocities.
   joint_vel_rel:
-    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    history_length: 1
-
-  # [67:96] — previous policy output (raw deltas, before scale/offset applied)
+    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    history_length: 5
+  # [335:480] — previous raw policy output, before scale/offset.
   last_action:
-    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    history_length: 1
-
-  # [96:99] — velocity command from joystick [vx, vy, yaw]
+    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    history_length: 5
+  # [480:495] — joystick twist [vx, vy, yaw].
   velocity_commands:
     params: {command_name: twist}
     scale: [1.0, 1.0, 1.0]
-    history_length: 1
+    history_length: 5

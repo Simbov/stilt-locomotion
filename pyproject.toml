@@ -27,6 +27,7 @@ include = ["stilt*"]
 [dependency-groups]
 dev = [
     "fast-simplification>=0.1.13",
+    "onnxruntime>=1.24.3",
     "pytest>=9.1.1",
     "ruff>=0.16.1",
 ]

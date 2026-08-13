@@ -474,6 +474,56 @@ observation history. Two things follow for deployment:
   no "stilt mode" flag to set. Fit them or don't; the policy adapts within a few
   control steps. Expect the first few steps after a change to be the shakiest.
 
-> `deploy/config/g1_stilt/deploy.yaml` is currently **superseded** — it still
-> holds Run 5's arrays and is single-frame. Regenerate it from the Run 8 ONNX
-> metadata after training; do not hand-edit it.
+### The config is generated, not written
+
+`deploy/config/g1_stilt/deploy.yaml` is now current, generated from the Run 8
+ONNX (`2026-08-13_20-35-42_run8-stilts-on-off`). **Do not hand-edit it** — the
+PD gains, action scales and standing pose all come out of the trained policy and
+cannot be derived by hand. After any retrain:
+
+```bash
+uv run python scripts/generate_deploy_config.py --run logs/rsl_rl/stilt_g1_velocity/<run>
+```
+
+That also writes `reference_io.json`: recorded (observation, action) pairs taken
+straight from the sim.
+
+### Verify before the robot takes weight
+
+The observation layout above is the most likely thing to get wrong, and getting
+it wrong gives you a policy that loads, runs, and merely walks badly — there is
+no error to catch. Run this on the machine that will serve the policy, against
+the exact `.onnx` that shipped there:
+
+```bash
+uv run python scripts/verify_deploy_io.py --onnx <policy>.onnx
+```
+
+It should report `PASS`, worst error under 1e-4. Locally the Run 8 model
+reproduces to 6.4e-6.
+
+This checks the model and the layout. It **cannot** tell you the runtime is
+filling those slots with the right sensor values. For that, hold the robot in
+the standing pose, log one real observation, and compare it term by term against
+a reference pair — `projected_gravity` should be near `(0, 0, -1)`, `joint_pos`
+near zero (it is relative to `default_joint_pos`), and `base_ang_vel` near zero.
+
+### First bring-up, in order
+
+The policy handles both morphologies, so start with the easier one:
+
+1. **Bare robot, suspended.** No stilts, robot on the gantry or hoist, feet off
+   the ground. Confirm it holds the standing pose and the joints are not
+   buzzing or fighting.
+2. **Bare robot, on the ground, zero command.** It should stand. Pelvis ~0.79 m.
+3. **Bare robot, walking.** Work up through the command range. It tracks
+   forward well to about 0.4 m/s and saturates near 0.56; yaw undershoots by
+   roughly half and varies between attempts, so judge it over several.
+4. **Only then fit the stilts.** Pelvis goes to ~1.20 m. No config change, no
+   flag — the policy re-infers the morphology within a few control steps, and
+   those first steps are the shakiest part of the whole sequence.
+
+Keep the hoist attached through step 4. In sim the stilted robot never fell in
+40 episodes, but the brace stiffness is the least-grounded number in the model —
+the real clamp has never been measured, and the training range (150–2000 Nm/rad)
+is an engineering guess.
