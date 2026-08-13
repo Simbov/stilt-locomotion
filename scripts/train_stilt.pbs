@@ -1,7 +1,15 @@
 #!/bin/bash -l
 #PBS -N stilt-train
 #PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
-#PBS -l walltime=8:00:00
+# Run 6 did 6000 iterations in 2h22m on the same hardware. Run 8 is a little
+# heavier per iteration — 29 DoF instead of 25, and the actor input is 5 frames
+# of history (495 wide, not 99) — but the physics dominates and the extra
+# network cost is a couple of percent, so expect 2h30m-3h. 4h leaves headroom
+# without asking the scheduler for a slot twice the size of the job.
+#
+# Overrunning is not fatal: --agent.save-interval 500 means the worst case is
+# losing the last <500 iterations and the ONNX export, not the run.
+#PBS -l walltime=4:00:00
 #PBS -m abe
 #PBS -M n11298111@qut.edu.au
 #PBS -j oe
