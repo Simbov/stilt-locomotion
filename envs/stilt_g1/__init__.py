@@ -46,11 +46,11 @@ SECTION_LIMIT = {
 # Bar scale for per-capsule ground pressure (N).
 CAPSULE_LIMIT_N: float = 400.0
 
-# Actuator effort limits (Nm). The ankles are welded by the stilt's shank clamp
-# and no longer exist as joints, so they are not monitored.
+# Actuator effort limits (Nm).
 _LIMIT = {
   "hip": 88.0,  # 7520-14
   "knee": 139.0,  # 7520-22
+  "ankle": 50.0,  # 5020, both pitch and roll
 }
 
 _MONITOR_JOINTS: list[tuple[str, str, float]] = [
@@ -59,6 +59,13 @@ _MONITOR_JOINTS: list[tuple[str, str, float]] = [
   ("right_hip_pitch_joint", "R hip pitch ", _LIMIT["hip"]),
   ("left_knee_joint", "L knee      ", _LIMIT["knee"]),
   ("right_knee_joint", "R knee      ", _LIMIT["knee"]),
+  # The ankles are back and actuated. Worth watching whenever the stilts are
+  # fitted: the brace spring is what they are working against, and the clamp
+  # stiffness is a guess, so this is where an over-stiff brace shows up first.
+  ("left_ankle_pitch_joint", "L ankle pit ", _LIMIT["ankle"]),
+  ("right_ankle_pitch_joint", "R ankle pit ", _LIMIT["ankle"]),
+  ("left_ankle_roll_joint", "L ankle roll", _LIMIT["ankle"]),
+  ("right_ankle_roll_joint", "R ankle roll", _LIMIT["ankle"]),
 ]
 
 _SEGMENT_LABEL = {
@@ -96,6 +103,37 @@ def _stilt_mass_play_gui(server: viser.ViserServer, env: EnvProtocol) -> None:
       return int(robot.indexing.body_ids[body_names.index(name)].item())
     except (ValueError, IndexError):
       return None
+
+  # --- Stilts fitted or not ---
+  # The policy is trained on a 50/50 draw, so by default a single-env viewer
+  # would flip morphology at random on every reset, which makes it impossible to
+  # watch either one. This pins the draw. It takes effect at the NEXT reset
+  # rather than immediately: mass, contact geometry, tip sites, ankle stiffness,
+  # standing pose and root height all have to change together, and the reset
+  # event is the one place that does all six consistently.
+  try:
+    fitted_cfg = raw_env.event_manager.get_term_cfg("stilts_fitted")
+  except (AttributeError, ValueError):
+    fitted_cfg = None
+
+  fitted_readback = None
+  if fitted_cfg is not None:
+    with server.gui.add_folder("Stilts"):
+      fitted_mode = server.gui.add_dropdown(
+        "fitted",
+        ("always on", "always off", "randomised 50/50"),
+        initial_value="always on",
+      )
+      fitted_readback = server.gui.add_markdown("*—*")
+      fitted_cfg.params["fitted_probability"] = 1.0
+
+      @fitted_mode.on_update
+      def _(_) -> None:
+        fitted_cfg.params["fitted_probability"] = {
+          "always on": 1.0,
+          "always off": 0.0,
+          "randomised 50/50": 0.5,
+        }[fitted_mode.value]
 
   # --- Per-segment stilt mass, editable live ---
   with server.gui.add_folder("Stilt Mass"):
@@ -192,8 +230,9 @@ def _stilt_mass_play_gui(server: viser.ViserServer, env: EnvProtocol) -> None:
   # --- Stilt section loads ---
   with server.gui.add_folder("Stilt Loads"):
     server.gui.add_markdown(
-      "*brace row is inertial load only — **not** the clamp reaction "
-      "(statically indeterminate with the ankle welded)*"
+      "*brace row is inertial load only — **not** the clamp reaction. "
+      "The split between the sole bolts and the shank clamp is statically "
+      "indeterminate; the sim gives the total wrench only.*"
     )
     loads_md = server.gui.add_markdown("*—*")
 
@@ -242,6 +281,13 @@ def _stilt_mass_play_gui(server: viser.ViserServer, env: EnvProtocol) -> None:
         pressure_md.content = _pressure_text(raw_env)
       except Exception as e:
         loads_md.content = f"*loads unavailable: {e}*"
+
+      # What the sim is ACTUALLY running, not what the dropdown asks for — the
+      # two differ until the next reset.
+      if fitted_readback is not None:
+        flag = getattr(raw_env, "stilt_fitted", None)
+        state = "—" if flag is None else ("**ON**" if flag[0] > 0.5 else "**OFF**")
+        fitted_readback.content = f"stilts currently {state} in the sim"
 
       time.sleep(0.1)
 

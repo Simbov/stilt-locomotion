@@ -1,5 +1,15 @@
 # New Stilt Design Implementation Plan
 
+> ### ⚠️ Executed, and then partly reversed on 2026-08-13
+>
+> Every task here was carried out, but the ankle-removal work (Task 2 onward,
+> wherever it deletes joints or drops the action space to 25) was **undone**: the
+> robot is always the stock 29-DoF G1 and the stilts bolt on and off. The brace
+> is now modelled as randomised ankle joint stiffness instead of a weld. See the
+> banner on the matching spec, and `STATUS.md`, for the current design. Read this
+> plan as a record of how the CAD partition, body tree, contact geometry and
+> instrumentation were built — all of which still stand.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the single-box stilt with the real telescoping shank-clamped hardware — a 5-segment rigid body tree with correct mass properties, welded ankles, randomised height, and live load/mass instrumentation in the viewer.

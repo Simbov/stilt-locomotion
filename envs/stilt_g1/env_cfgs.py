@@ -6,10 +6,10 @@ updating all reward/sensor parameters that reference foot sites or geoms.
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import dr
-from mjlab.envs.mdp import terminations as base_terminations
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import (
@@ -20,15 +20,19 @@ from mjlab.sensor import (
 )
 from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
 
+from . import metrics as stilt_metrics
+from . import terminations as stilt_terminations
 from .curriculums import (
   stilt_height_curriculum,
   stilt_mass_curriculum,
   stilt_termination_curriculum,
 )
-from .events import reset_stilt_spawn_height
+from .events import reset_stilt_spawn_height, reset_stilts_fitted
 from .stilt_robot import (
   STILT_G1_ACTION_SCALE,
   STILT_NOMINAL_POST_INNER_Z,
+  STILT_SPAWN_RISE,
+  STILT_TIP_SITE_RISE,
   get_stilt_g1_robot_cfg,
 )
 
@@ -40,10 +44,22 @@ _STILT_GEOM_NAMES = tuple(
   for i in range(1, 5)
 )
 
+# The robot's own foot capsules, live whenever the stilts are off.
+_FOOT_GEOM_NAMES = tuple(
+  f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
+)
+
+# One site per leg, at the surface that actually touches the ground. It sits at
+# the stilt plate when the stilts are fitted and is slid up to the robot's own
+# sole when they are not — see reset_stilts_fitted.
 _STILT_SITE_NAMES = ("left_stilt_tip", "right_stilt_tip")
 
 # Name of the per-capsule ground-reaction sensor, read by the viewer load panel.
 STILT_CONTACT_SENSOR = "stilt_contact"
+
+# Frames of observation history given to the actor so it can sense whether the
+# stilts are fitted. See the observations block below.
+STILT_OBS_HISTORY = 5
 
 # The five rigid segments per stilt, from the MJCF.
 _STILT_SEGMENTS = (
@@ -103,6 +119,19 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
   )
 
+  # ── Observations ───────────────────────────────────────────────────────────
+  # Memory. The stilts come on and off, and nothing in the observation says
+  # which. The actor has to infer it from how the robot responds, which is
+  # impossible from a single frame — the two morphologies look identical at one
+  # instant and differ only in their dynamics. A short history makes the
+  # inference available without telling the policy anything the robot cannot
+  # sense on hardware.
+  #
+  # 5 frames x 99 = 495 inputs. Raise if the policy struggles to distinguish the
+  # two modes; lower if the deploy runtime cannot buffer this much.
+  cfg.observations["actor"].history_length = STILT_OBS_HISTORY
+  cfg.observations["actor"].flatten_history_dim = True
+
   # ── Rewards ────────────────────────────────────────────────────────────────
   # foot_clearance and foot_slip use asset_cfg.site_names; foot_swing_height
   # uses the contact sensor subtree (ankle_roll_link) so needs no change.
@@ -130,27 +159,31 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # 0.3 keeps it active across most of it.
   cfg.rewards["air_time"].params["command_threshold"] = 0.3
 
-  # The stock G1 pose reward keys per-joint std on regexes that include the
-  # ankles. Those joints no longer exist, and mjlab raises if a regex matches
-  # nothing, so drop those entries.
-  for std_key in ("std_standing", "std_walking", "std_running"):
-    stds = cfg.rewards["pose"].params[std_key]
-    for pattern in [k for k in stds if "ankle" in k]:
-      del stds[pattern]
-
-  # NOTE: no `alive` / `terminated` survival shaping here, deliberately.
-  # Episodes once collapsed to a single step, which looked like the classic
-  # "dying is cheaper than trying" failure — but the real cause was a stale-read
-  # bug in reset_stilt_spawn_height (see envs/stilt_g1/events.py), which spawned
-  # every episode after the first in the previous episode's fallen pose. With
-  # that fixed, an ablation at 64 envs / 15 iterations showed survival shaping
-  # is not needed: episode length reaches ~75 with it and ~78-80 without.
-  # An `alive` bonus large enough to matter (+0.04/step) would also outweigh the
-  # velocity tracking reward (+0.012/step) and bias the policy toward standing
-  # still, so it stays out.
+  # NOTE: no `alive` / `terminated` survival shaping here, deliberately, and
+  # SMALL-SCALE SMOKE RUNS WILL LOOK LIKE THEY NEED IT. Don't be fooled.
+  #
+  # At 128 envs on CPU, episode length climbs to ~60 and then falls steadily
+  # while the return rises — the classic "dying is cheaper than trying" shape,
+  # because the per-step reward is net negative early and truncating the episode
+  # truncates the penalty. It is tempting to read that as a broken reward.
+  #
+  # It is not. Stock G1 — mjlab's own task, none of this project's code — does
+  # exactly the same thing at 128 envs, and worse: it peaks at 63 and is down to
+  # 9.9 by iteration 33, against 29 at iteration 40 for this config. It is a
+  # small-batch artifact of 128x24 = 3072 samples per update. At 4096 envs the
+  # same reward structure took Run 7 to 1000/1000 with zero falls.
+  #
+  # So: judge a smoke run by whether it beats the stock-G1 control at the SAME
+  # env count, not by whether episode length rises monotonically. And an `alive`
+  # bonus large enough to matter (+0.04/step) would outweigh velocity tracking
+  # (+0.012/step) and bias the policy toward standing still, so it stays out.
 
   # ── Domain randomisation ───────────────────────────────────────────────────
-  cfg.events["foot_friction"].params["asset_cfg"].geom_names = _STILT_GEOM_NAMES
+  # Both contact sets, because both are used: the stilt capsules when the stilts
+  # are fitted and the robot's own foot capsules when they are not.
+  cfg.events["foot_friction"].params["asset_cfg"].geom_names = (
+    _STILT_GEOM_NAMES + _FOOT_GEOM_NAMES
+  )
 
   # Stilt mass curriculum. alpha is a log-scale mass multiplier applied to every
   # segment: mass = 2.8 * e^(2*alpha) per stilt. Inertia scales consistently via
@@ -164,29 +197,49 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     },
   )
 
-  # Telescope offset on the inner post. Negative = post pushed down = longer
-  # stilt. Nominal 0.0 is the assembled 407.5 mm configuration.
+  # Telescope height. Moves the whole lower assembly — inner tube, ground plate,
+  # contact capsules and tip site — so the stilt genuinely gets longer or
+  # shorter. shared_random because both legs are set to the same length on real
+  # hardware; the spawn-height term below relies on that.
   cfg.events["stilt_height"] = EventTermCfg(
     func=dr.body_pos,
     mode="reset",
     params={
       "ranges": (0.0, 0.0),  # overwritten each step by the curriculum
+      "asset_cfg": SceneEntityCfg("robot", body_names=list(_STILT_INNER_POST_BODIES)),
       "axes": [2],
       "operation": "add",
-      # Both stilts are physically set to the same length on the hardware.
       "shared_random": True,
-      "asset_cfg": SceneEntityCfg("robot", body_names=list(_STILT_INNER_POST_BODIES)),
     },
   )
 
-  # MUST stay after stilt_height: EventManager runs reset terms in dict order,
-  # and scene.reset() (which applies the keyframe) has already run by now, so
-  # the spawn height cannot know the sampled stilt length on its own.
+  # Stilts on or off, drawn per environment. One event because mass, contact
+  # geometry, tip sites and brace stiffness all have to agree.
+  #
+  # MUST follow stilt_mass: it scales whatever mass the curriculum sampled, so
+  # running it first would let pseudo_inertia put the full mass back.
+  cfg.events["stilts_fitted"] = EventTermCfg(
+    func=reset_stilts_fitted,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("robot"),
+      "fitted_probability": 0.5,
+      # A bolted clamp onto a rigid shank is close to rigid. The real value is
+      # unmeasured, so randomise wide and make the policy cope with all of it.
+      "brace_stiffness_range": (150.0, 2000.0),
+      "tip_site_rise": STILT_TIP_SITE_RISE,
+    },
+  )
+
+  # MUST follow stilts_fitted AND stilt_height: EventManager runs reset terms in
+  # dict order, and scene.reset() (the keyframe) has already placed the robot at
+  # its stilts-off height by this point.
   cfg.events["stilt_spawn_height"] = EventTermCfg(
     func=reset_stilt_spawn_height,
     mode="reset",
     params={
       "asset_cfg": SceneEntityCfg("robot", body_names=list(_STILT_INNER_POST_BODIES)),
+      "spawn_rise": STILT_SPAWN_RISE,
       "nominal_z": STILT_NOMINAL_POST_INNER_Z,
     },
   )
@@ -242,6 +295,9 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       },
     )
 
+    # Telescope length. Held fixed while the policy learns to walk at all, then
+    # widened. Capped at +/-50 mm until the minimum safe tube overlap is
+    # confirmed — see CLAUDE.md.
     cfg.curriculum["stilt_height"] = CurriculumTermCfg(
       func=stilt_height_curriculum,
       params={
@@ -253,37 +309,73 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           {"step": 750 * 24, "offset_range": (-0.020, 0.020)},
           # iter 1500 → 357–457 mm
           {"step": 1500 * 24, "offset_range": (-0.050, 0.050)},
-          # The full mechanical range (352–522 mm) is gated on confirming the
-          # minimum safe tube overlap — do not widen past ±50 mm until then.
         ],
       },
     )
 
     # Start permissive so early episodes are long enough to discover balance,
-    # then tighten to the real limits. Final values match the stock G1
-    # fell_over angle (1.2217 rad = 70°) and our torso_too_low floor (0.65 m).
+    # then tighten to the real limits. The final angle matches the stock G1
+    # fell_over (1.2217 rad = 70°); the two height floors are per morphology,
+    # roughly 60% of that morphology's standing height (see terminations.py).
     cfg.curriculum["stilt_termination"] = CurriculumTermCfg(
       func=stilt_termination_curriculum,
       params={
         "stages": [
-          {"step": 0, "limit_angle": 1.5708, "minimum_height": 0.40},
-          {"step": 300 * 24, "limit_angle": 1.4000, "minimum_height": 0.50},
-          {"step": 800 * 24, "limit_angle": 1.3000, "minimum_height": 0.58},
-          {"step": 1500 * 24, "limit_angle": 1.2217, "minimum_height": 0.65},
+          {"step": 0, "limit_angle": 1.5708, "height": 0.28, "fitted_height": 0.40},
+          {
+            "step": 300 * 24,
+            "limit_angle": 1.4000,
+            "height": 0.34,
+            "fitted_height": 0.50,
+          },
+          {
+            "step": 800 * 24,
+            "limit_angle": 1.3000,
+            "height": 0.40,
+            "fitted_height": 0.58,
+          },
+          {
+            "step": 1500 * 24,
+            "limit_angle": 1.2217,
+            "height": 0.45,
+            "fitted_height": 0.65,
+          },
         ],
       },
     )
 
+  # ── Metrics ────────────────────────────────────────────────────────────────
+  # Split by morphology. The aggregate cannot distinguish "walks on stilts,
+  # falls over without them" from "mediocre at both" — see metrics.py for how to
+  # read the masked means.
+  cfg.metrics["stilts_fitted_fraction"] = MetricsTermCfg(
+    func=stilt_metrics.stilts_fitted_fraction
+  )
+  cfg.metrics["vel_error_stilts_on"] = MetricsTermCfg(
+    func=stilt_metrics.vel_error_stilts_on
+  )
+  cfg.metrics["vel_error_stilts_off"] = MetricsTermCfg(
+    func=stilt_metrics.vel_error_stilts_off
+  )
+  cfg.metrics["upright_stilts_on"] = MetricsTermCfg(
+    func=stilt_metrics.upright_stilts_on
+  )
+  cfg.metrics["upright_stilts_off"] = MetricsTermCfg(
+    func=stilt_metrics.upright_stilts_off
+  )
+
   # ── Terminations ───────────────────────────────────────────────────────────
-  # Stilt G1 pelvis spawn height is 1.1843 m (see STILT_SPAWN_HEIGHT). With the
-  # ankle welded the stance is straighter than before — knee 0.10 rad cancelled
-  # at the hip — so there is less pelvis drop available before the pose is
-  # genuinely collapsed. A pelvis below 0.65 m means the stilts are near
-  # horizontal. Keep this generous: an earlier 0.85 m threshold fired after 13
-  # steps (0.26 s) on any extra knee bend, and the robot never learned anything.
+  # Two floors, because the two morphologies stand 44 cm apart: 0.7565 m at the
+  # pelvis without the stilts and 1.1977 m with them. One shared number cannot
+  # work — 0.65 m is a collapsed stilt walker but a perfectly normal squat for
+  # the bare robot.
+  #
+  # Both are deliberately generous. An earlier 0.85 m threshold on the fitted
+  # case fired after 13 steps (0.26 s) on any extra knee bend and the robot never
+  # learned anything. Below these the leg is near horizontal and unrecoverable.
   cfg.terminations["torso_too_low"] = TerminationTermCfg(
-    func=base_terminations.root_height_below_minimum,
-    params={"minimum_height": 0.65},
+    func=stilt_terminations.root_height_below_minimum,
+    params={"minimum_height": 0.45, "fitted_minimum_height": 0.65},
   )
 
   return cfg

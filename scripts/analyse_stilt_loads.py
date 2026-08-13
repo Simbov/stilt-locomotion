@@ -120,6 +120,9 @@ def sample_loads(checkpoint: Path, stilt_mass_kg: float) -> np.ndarray:
   cfg = stilt_g1_flat_env_cfg(play=True)
   cfg.scene.num_envs = 1
   cfg.events["stilt_mass"].params["alpha_range"] = (alpha, alpha)
+  # The policy is trained on a 50/50 stilts-on/off draw; pin it on, or half the
+  # sampled episodes would be the bare robot and report zero stilt load.
+  cfg.events["stilts_fitted"].params["fitted_probability"] = 1.0
 
   raw = ManagerBasedRlEnv(cfg=cfg, device="cpu")
   env = RslRlVecEnvWrapper(raw, clip_actions=None)

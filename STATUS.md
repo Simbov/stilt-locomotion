@@ -1,38 +1,115 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-08-07**
+**Last updated: 2026-08-13**
 
 ---
 
-## ⚠️ New stilt design landed (2026-08-07) — Run 5 superseded
+## ⚠️ Runs 6 and 7 are void — the ankles are never welded
 
-The stilt was replaced with the real telescoping shank-clamped hardware
-(`Assembled 40.7cm.STL`): 407.5 mm tall, **2.8 kg per side**, five rigid
-segments with CAD-derived inertia, and a brace that **clamps the shank so the
-ankle joints are deleted** (action space **29 → 25**). Telescope height is now
-domain-randomised, and the viewer gained per-segment mass sliders plus section
-load and ground-pressure readouts.
+Runs 6 and 7 trained a **25-DoF** policy for a robot whose ankle joints had been
+deleted, on the reading that the shank brace rigidly clamps the calf. **That robot
+does not exist.** The hardware is always the stock **29-DoF** G1 with its own
+feet; the stilts bolt on and come off, and nothing is ever done to the real ankle
+motors to hold them straight.
 
-**Consequences:**
-- **The Run 5 checkpoint is invalid.** Different action space, mass, inertia,
-  height and stance. A fresh training run is required.
-- **`deploy/config/g1_stilt/deploy.yaml` is superseded** and must be regenerated
-  from the new ONNX metadata. Its arrays are still 29-DOF.
-- **Expect slower convergence than Run 5.** With the ankle welded there is no
-  ankle balance strategy at all — lateral balance is hip-roll only, and the
-  brace puts 1.0 kg above the ankle. This is genuine peg-stilt walking.
+Every checkpoint before Run 8 is therefore invalid, and so are the load figures in
+the structural report — they were sampled from the Run 7 policy. The report's
+geometry and material sections came from the CAD and still stand; regenerate the
+loads with `scripts/analyse_stilt_loads.py` once Run 8 has a checkpoint.
 
-**Trainability verified (2026-08-07).** A 64-env CPU smoke run reaches mean
-episode length ~80 and holds, against ~53 for a matched stock-G1 control. An
-earlier apparent training collapse was traced to a stale-read bug in
-`reset_stilt_spawn_height`, not to the task — see spec §14. No reward shaping
-is used. **Ready for an HPC run.**
+## Run 8 — one policy, stilts on and off
+
+The task Run 8 trains is deliberately harder than anything before it: **a single
+policy that walks with the stilts fitted and with them removed**, without being
+told which. Each episode draws a morphology at 50/50, and the policy infers it
+from 5 frames of observation history.
+
+| | stilts ON | stilts OFF |
+|---|---|---|
+| Ground contact | 16 stilt capsules | the robot's own 14 foot capsules |
+| Stilt mass | 2.8 kg/side, curriculum 0.9–7.6 kg | ×0.001 (removed) |
+| Ankle | sprung 150–2000 Nm/rad by the brace | free, PD-controlled |
+| Pelvis spawn | 1.1977 m | 0.7902 m |
+| `torso_too_low` | 0.65 m | 0.45 m |
+| Standing pose | shank vertical, `hip_pitch = −knee = −0.10`, ankle 0 | **the same** |
+
+**One shared pose, not two.** The action offset and the `pose` reward both key on
+the keyframe, so a zero action commands it. On stilts that pose is forced — the
+post is clamped parallel to the shank, so the stilt only stands up at
+`hip_pitch = −knee` with the ankle at the brace's neutral angle. Giving the bare
+robot its own stock crouch instead makes the neutral action a falling pose in the
+fitted envs; a smoke run with split poses collapsed from 35 to 16 mean episode
+length while the return rose, which is a policy learning that ending the episode
+is cheaper than standing.
+
+The brace is modelled as **ankle joint stiffness applied at reset**, not as a
+weld. A bolted clamp onto a rigid shank is close to rigid, so the physics is much
+the same, but the DoF stays where the hardware has one and it disappears cleanly
+when the stilts come off. The stiffness is randomised wide because the real clamp
+has never been measured — that is the largest open modelling risk in Run 8.
+
+**Reading the curves.** The aggregate metrics cannot distinguish "walks on stilts,
+falls over without them" from "mediocre at both", so
+`envs/stilt_g1/metrics.py` logs masked per-mode versions. Divide by
+`stilts_fitted_fraction` (or `1 − fraction`) for the conditional mean:
+
+- `Episode_Metrics/vel_error_stilts_{on,off}`
+- `Episode_Metrics/upright_stilts_{on,off}`
+
+**Two bugs the pre-flight caught, both worth remembering:**
+
+- `CollisionCfg.disable_other_geoms` defaults to `True`, so listing only the
+  stilt capsules in `geom_names_expr` disabled the robot's own feet. The bare
+  envs were free-falling through the floor while still logging as upright — a
+  falling torso is perfectly vertical. Fixed by enabling both sets; pinned by
+  `test_both_contact_sets_can_actually_collide`.
+- Calling `sim.expand_model_fields()` from inside a reset event recreates the
+  CUDA graph *on every reset*. Invisible on CPU, ruinous on the H100. The
+  supported path is the `@requires_model_fields` decorator, which expands once
+  at construction.
+
+**Pre-flight, all green (2026-08-13):**
+
+- `uv run pytest tests/ -q` — 53 passed
+- `uv run python scripts/check_height_dr.py` — both morphologies spawn resting on
+  the floor across the full ±50 mm telescope range
+- `uv run python scripts/solve_spawn_height.py` — both spawn heights solved, not
+  hand-tuned
+- Both morphologies stand passively at zero action for 30 steps — pelvis holds
+  at 1.195 m and 0.781 m, and each mode's contact set is the one reporting
+- CPU smoke run at 128 envs, benchmarked against a stock-G1 control at the same
+  scale (see below)
+
+**How to read a small smoke run — this cost an hour, so it is written down.**
+At 128 envs the stilt config climbs to ~64 mean episode length by iteration 4,
+holds to ~25, then declines while the return rises. That is the textbook "dying
+is cheaper than trying" shape and it looks like a broken reward.
+
+It isn't. **Stock G1 — mjlab's own task, none of this project's code — does the
+same thing at 128 envs, and worse:** it peaks at 63 and is down to 9.9 by
+iteration 33, against 29 at iteration 40 for the stilt config. With 128×24 =
+3072 samples per update, PPO simply falls into the degenerate optimum. At 4096
+envs the identical reward structure took Run 7 to 1000/1000 with zero falls.
+
+| iteration | stock G1 control | Run 8 config |
+|---|---|---|
+| peak | 63 | 64 |
+| 33 | 9.9 | ~47 |
+| 40 | — | 29 |
+
+So judge a smoke run against the stock control at the same env count, never
+against a monotonic ideal.
 
 Design and plan: `docs/superpowers/specs/2026-08-07-new-stilt-design.md`,
-`docs/superpowers/plans/2026-08-07-new-stilt-design.md`.
+`docs/superpowers/plans/2026-08-07-new-stilt-design.md` — **both carry a
+superseding banner on the ankle question**; everything else in them still holds.
 
 ---
 
-## Run 6 result (2026-08-08_10-46-51) — balances, walks slowly, cannot turn
+## Run 6 result (2026-08-08_10-46-51) — VOID, kept for the lessons
+
+> **Void:** trained with the ankle joints deleted (25-DoF). Do not deploy this
+> checkpoint. The reward and curriculum findings below carried over into Run 8 and
+> are why it is kept.
 
 First run on the new telescoping stilt. 6000 iterations, 4096 envs, ~2h22m.
 ONNX exported. **Balance is solved; velocity tracking is not.**
@@ -81,9 +158,32 @@ only covers a narrow low-speed band and freezes elsewhere.
 
 ---
 
+## Run 7 result (run7-airtime-cappedcmd) — VOID, but its fixes carried
+
+> **Void:** same 25-DoF model as Run 6. Do not deploy. The two changes it tested
+> both worked and are still in `env_cfgs.py` for Run 8.
+
+Run 6 plus `air_time` at weight 0.5 (`command_threshold` 0.3) and a command
+curriculum capped at 0.8 m/s instead of ramping to 2.0. Both landed:
+
+| | Run 6 | Run 7 |
+|---|---|---|
+| Mean episode length | 983.2 | **1000 / 1000** |
+| `fell_over` | 0.00 | 0.00 |
+| Achieved vx | ~0.35, frozen above 0.7 | 0.4–0.6, saturating ~0.52 |
+| Yaw | ~0.005 rad/s (none) | turns at a 0.6 command |
+| `air_time` | — | 0.139 s |
+
+The speed freeze was gone and yaw appeared, which is why both changes were kept.
+Structural loads were sampled from this checkpoint, so the published report needs
+regenerating against Run 8.
+
+---
+
 ## Deployment Infrastructure (`deploy/`)
 
-Hardware deployment config is ready for when Run 5 produces a good checkpoint.
+Hardware deployment config is in place, but `deploy.yaml` itself is stale — see
+the banner in that file. Regenerate it from the Run 8 ONNX metadata.
 
 | File | Purpose |
 |---|---|
@@ -102,48 +202,59 @@ Hardware deployment config is ready for when Run 5 produces a good checkpoint.
 
 ### Robot Model (`assets/mjcf/g1/g1.xml`)
 - Local copy of the G1 MJCF, safe to modify (mjlab original untouched in `.venv`)
-- Stilts attached as rigid bodies to both `left_ankle_roll_link` and `right_ankle_roll_link`
-- Stilt STL: 220×80×400 mm physical stilt; loaded with `scale="0.001 0.001 0.001"` and `refpos="70 40 435"` (pre-scale mm units) so the attachment face sits flush at the ankle origin
-- Original G1 foot capsules commented out, replaced by 8 collision capsules per stilt (4 left block + 4 right block, modelled after G1's foot capsule style)
-- Capsule positions: z = −0.425 m from ankle, radius = 0.01 m → bottom at −0.435 m
-- `foot_capsule` default class explicitly sets `friction="1.0 0.005 0.0001" condim="3"` to guarantee ground contact regardless of CollisionCfg
-- Pelvis spawn height in MJCF: 1.228 m (standing straight; training uses 1.16 m via keyframe)
-- Stilt tip sites: `left_stilt_tip`, `right_stilt_tip` at `pos="0.04 0 -0.435"`
-- Stilt inertial properties: **`mass="1.5"`**, **`diaginertia="0.024 0.024 0.003"`** (increased from 0.5 kg on 2026-04-21), COM at `pos="0.04 0 -0.2"`
+- **Stock 29-DoF G1**: all four ankle joints present and actuated, all 14 of the
+  robot's own foot capsules live
+- Stilts attached as a 5-body jointless tree under each `*_ankle_roll_link`, from
+  the telescoping shank-clamped CAD — 2.8 kg per side, 407.5 mm ground-to-mount,
+  CAD-derived inertia from `scripts/build_stilt_meshes.py` (never hand-tuned)
+- 16 stilt contact capsules (8 per side), bottom at −0.4425 m in the ankle frame;
+  the robot's own foot capsules bottom out at −0.035 m
+- `foot_capsule` default class explicitly sets `friction="1.0 0.005 0.0001" condim="3"`
+  to guarantee ground contact regardless of CollisionCfg
+- Stilt tip sites `left_stilt_tip` / `right_stilt_tip` at `pos="0.04 0 -0.4425"`;
+  the reset event slides them up to the sole when the stilts come off
 
 ### Stilt Environment (`envs/stilt_g1/`)
 | File | Purpose |
 |---|---|
-| `env_cfgs.py` | Env config — overrides sites, geom names, reward targets, terminations, DR events, curricula |
-| `curriculums.py` | Custom `stilt_mass_curriculum` class — widens stilt mass range over training |
-| `stilt_robot.py` | Robot config — local MJCF path, spawn keyframe, CollisionCfg |
+| `env_cfgs.py` | Env config — overrides sites, geom names, reward targets, terminations, DR events, curricula, metrics |
+| `curriculums.py` | `stilt_mass_curriculum`, `stilt_height_curriculum`, `stilt_termination_curriculum` |
+| `events.py` | `reset_stilts_fitted` (the whole on/off draw) and `reset_stilt_spawn_height` |
+| `terminations.py` | `root_height_below_minimum` with a floor per morphology |
+| `metrics.py` | Masked per-morphology tracking error and uprightness |
+| `loads.py` | Section loads from the contact sensor, for the viewer and the statics tests |
+| `stilt_robot.py` | Robot config — local MJCF path, both standing poses, CollisionCfg |
 | `rl_cfg.py` | PPO hyperparameters (inherited from stock G1) |
-| `__init__.py` | Registers `Mjlab-Velocity-Flat-Stilt-G1` + viewer GUI (mass slider, torque monitor) |
+| `__init__.py` | Registers `Mjlab-Velocity-Flat-Stilt-G1` + viewer GUI (mass sliders, loads, torque monitor) |
 
 **Key environment settings vs stock G1:**
+- Actor observation history 5 frames (495 inputs) — the policy's only way to tell
+  the two morphologies apart
 - `foot_height_scan` sensor rewired to stilt tip sites (drives foot_height obs + height rewards)
 - `foot_clearance` / `foot_slip` use stilt tip sites via `asset_cfg.site_names`
-- `foot_clearance` target height → 0.10 m
-- `foot_swing_height` target height → 0.10 m (uses contact-sensor subtree, no site override needed)
-- `air_time` weight → 0.0 (disabled until robot can walk)
-- `torso_too_low` threshold → 0.65 m
-- Friction randomisation targets stilt capsule geoms
-- **Stilt mass curriculum active** — see curriculum section below
+- `foot_clearance` and `foot_swing_height` target height → 0.10 m
+- `air_time` weight → 0.5, `command_threshold` → 0.3 (Run 7's fix for the frozen gait)
+- Command curriculum capped at 0.8 m/s forward rather than ramping to 2.0
+- `torso_too_low` → 0.45 m bare, 0.65 m on stilts
+- Friction randomisation targets **both** contact sets
+- Per-capsule `stilt_contact` ContactSensor feeding the viewer load panel
 
 ### Stilt Mass Curriculum
-A four-stage curriculum progressively widens the stilt mass range during training.
-Uses `dr.pseudo_inertia` (via `alpha_range`) so mass and inertia scale consistently —
-physically correct for a density change. **Baseline stilt mass is 1.5 kg per stilt.**
+Four stages, progressively widening the stilt mass range. Uses `dr.pseudo_inertia`
+(via `alpha_range`) so mass and inertia scale consistently — physically correct for
+a density change. **Baseline stilt mass is 2.8 kg per stilt.**
 
 | Iter | Step | alpha range | Approx mass range | Purpose |
 |---|---|---|---|---|
-| 0 | 0 | `(0.0, 0.0)` | fixed 1.5 kg | Solid baseline for heavy design |
-| 500 | 12000 | `(-0.2, 0.2)` | 1.0–2.2 kg | Introduce variability early |
-| 1000 | 24000 | `(-0.4, 0.4)` | 0.67–3.3 kg | Widen to stress testing levels |
-| 2000 | 48000 | `(-0.55, 0.69)` | 0.5–6.0 kg | Maximum stress range (up to 4× baseline) |
+| 0 | 0 | `(0.0, 0.0)` | fixed 2.8 kg | Solid baseline |
+| 500 | 12000 | `(-0.2, 0.2)` | 1.9–4.2 kg | Introduce variability early |
+| 1000 | 24000 | `(-0.4, 0.4)` | 1.3–6.2 kg | Widen to stress testing levels |
+| 2000 | 48000 | `(-0.55, 0.5)` | 0.9–7.6 kg | Maximum stress range |
 
-`alpha` is a log-scale multiplier: mass = 1.5 × e^(2α). The curriculum logs
-`Curriculum/stilt_mass/stilt_mass_min_kg` and `stilt_mass_max_kg` to W&B.
+`alpha` is a log-scale multiplier: mass = 2.8 × e^(2α). The curriculum logs
+`Curriculum/stilt_mass/stilt_mass_min_kg` and `stilt_mass_max_kg` to W&B. Note it
+runs **before** the on/off draw, which then scales whatever it sampled — so in
+stilts-off envs the sampled mass is multiplied away, as it should be.
 
 ### Training Pipeline
 - `scripts/train_stilt.py` — registers env and calls mjlab's `train` entry point
@@ -182,7 +293,10 @@ To revert to any tag: `git checkout <tag-name>`
 | stilt run 3 | 2026-03-27_16-51-02 | short | abandoned | early test |
 | stilt run 4 | 2026-03-27_20-32-07 | 1499 | **broken** | 13-step episodes — torso_too_low threshold too high (0.85 m) |
 | stilt run 5 (false starts) | 2026-04-27_13-16→14-38 | 0 | aborted | several restarts, only `model_0` written |
-| **stilt run 5** | **2026-04-27_14-48-06** | **6000** | **✅ complete — robot walks** | mjlab v1.3, stilt mass curriculum, 1.5 kg baseline |
+| **stilt run 5** | **2026-04-27_14-48-06** | **6000** | complete — walked, but on the OLD box stilt | mjlab v1.3, stilt mass curriculum, 1.5 kg baseline |
+| stilt run 6 | 2026-08-08_10-46-51 | 6000 | **void** | new stilt, but 25-DoF welded ankles — balanced, could not turn |
+| stilt run 7 | run7-airtime-cappedcmd | 6000 | **void** | same 25-DoF error; air_time + capped commands both worked |
+| **stilt run 8** | pending | 6000 | queued | first run on the real 29-DoF robot; stilts on AND off |
 
 **Run 5 setup:**
 - 4096 envs, H100, ~3700 steps/sec, 32 GB RAM

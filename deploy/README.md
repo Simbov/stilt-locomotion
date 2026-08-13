@@ -421,22 +421,41 @@ for p in m.metadata_props:
 
 ## Ankle handling (stilt hardware)
 
-**Applies from the telescoping shank-clamped stilt onwards (2026-08-07).**
+**Rewritten 2026-08-13. The previous version of this section said the four ankle
+motors must be put in damping mode, and that the action vector is 25. Both are
+wrong — do not follow any copy of that instruction.**
 
-The stilt's brace clamps the shank, so ankle pitch and roll are mechanically
-locked. The joints are deleted from the sim model and the policy does not
-command them — **the action vector is 25, not 29.**
+The robot is the stock 29-DOF G1 in every configuration. **All four ankle motors
+stay in normal PD position mode and are driven by the policy, stilts on or off.**
+The action vector is **29**.
 
-**The four ankle motors must be left in damping mode, not PD position mode.**
-PD-tracking a position target into a rigid clamp makes the motors fight the
-structure and overheat. Set them to zero stiffness with non-zero damping in the
-runtime config before running `./g1_ctrl`.
+The brace does stiffen the ankle when the stilts are bolted on, but it does so
+mechanically, and the policy is trained against exactly that: ankle joint
+stiffness randomised 150–2000 Nm/rad in the fitted half of the training envs, and
+zero in the other half. It has learned to command the ankle into a clamp that may
+or may not be there. Putting the motors in damping mode would take away authority
+the policy is counting on.
 
-The affected joints, in the original 29-DOF ordering, are indices **4, 5, 10,
-11** (`left_ankle_pitch`, `left_ankle_roll`, `right_ankle_pitch`,
-`right_ankle_roll`). They are absent from the new policy's joint list, so
-`joint_ids_map` must skip them and the runtime must drive them separately.
+Watch ankle motor temperature on the first stilted runs anyway. The clamp
+stiffness is unmeasured — the 150–2000 Nm/rad range is an engineering guess — so
+if the real brace is stiffer than the top of that range the motors will do more
+static work than training predicted. If they run hot, measure the actual clamp
+stiffness and retrain with the range corrected; do not paper over it by changing
+the control mode.
+
+### One policy, two morphologies
+
+Run 8 onwards trains a single policy that walks with the stilts fitted and with
+them removed. It is **not** told which — it infers the morphology from 5 frames of
+observation history. Two things follow for deployment:
+
+- The runtime must buffer 5 frames of the 99-dim observation and feed the policy
+  the flattened 495-dim history, oldest first. A single-frame runtime will not
+  work with this policy.
+- No configuration switch is needed when the stilts come on or off, and there is
+  no "stilt mode" flag to set. Fit them or don't; the policy adapts within a few
+  control steps. Expect the first few steps after a change to be the shakiest.
 
 > `deploy/config/g1_stilt/deploy.yaml` is currently **superseded** — it still
-> holds Run 5's 29-DOF arrays. Regenerate it from the new ONNX metadata after
-> retraining; do not hand-edit it.
+> holds Run 5's arrays and is single-frame. Regenerate it from the Run 8 ONNX
+> metadata after training; do not hand-edit it.

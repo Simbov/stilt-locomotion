@@ -1,8 +1,36 @@
 # New Stilt Design — Telescoping Shank-Clamped Stilt
 
 **Date:** 2026-08-07
-**Status:** Approved design, pending implementation plan
+**Status:** Implemented, but **§3 is superseded — see the banner below**
 **Source CAD:** `Assembled 40.7cm.STL` (66 solids, 99,170 triangles, mm units)
+
+---
+
+> ### ⚠️ Superseded on 2026-08-13: the ankles are never removed
+>
+> **§3 (Kinematics — ankle removal) and everything downstream of it is wrong**, as
+> are the parts of §1, §11, §12, §13 and §14 that assume it. The rest of this
+> document — the CAD partition, mass properties, body tree, contact geometry,
+> load instrumentation and viewer design — still stands and is what the code
+> implements.
+>
+> **What was wrong.** §3 read the shank brace as a rigid weld and deleted the four
+> ankle joints, dropping the action space to 25. That is not the hardware. The
+> robot is always the stock 29-DoF G1 with its own feet; the stilts bolt on and
+> come off, and nothing is ever done to the real ankle motors to hold them
+> straight. Deleting the joints modelled a robot that does not exist.
+>
+> **What replaces it.** The ankle joints and `G1_ACTUATOR_ANKLE` stay, so the
+> action space is **29**. The brace is modelled as *joint stiffness* across the
+> ankle, applied at reset and randomised 150–2000 Nm/rad, which is present only
+> in the envs that drew "stilts fitted". This captures the same physics — a
+> bolted clamp onto a rigid shank is close to rigid — without inventing a
+> different robot, and it disappears cleanly when the stilts come off.
+>
+> **Consequences.** Runs 6 and 7 trained a 25-DoF policy and are **invalid**; so
+> are the load figures in the structural report, which were sampled from Run 7.
+> Run 8 trains one policy for both morphologies. The current design is described
+> in `STATUS.md` and `CLAUDE.md`; those are the living documents.
 
 ---
 

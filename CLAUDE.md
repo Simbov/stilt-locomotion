@@ -114,10 +114,10 @@ sensor is the only working source while the warp sim runs; the CPU-MuJoCo path
 in the same module exists for the tests, which verify the statics closes against
 a known static stand.
 
-**The brace row is inertial load only — not the clamp reaction.** With the ankle
-welded, shank and foot are one rigid body, so the split of the interface load
-between the sole bolts and the shank clamp is statically indeterminate. The sim
-gives the *total* wrench; the split needs a hand calc or FEA.
+**The brace row is inertial load only — not the clamp reaction.** The stilt bolts
+to the sole *and* clamps the shank, so the interface load has two parallel paths
+and the split between them is statically indeterminate. The sim gives the *total*
+wrench; the split needs a hand calc or FEA.
 
 Bar scales live in `SECTION_LIMIT` and `CAPSULE_LIMIT_N` at the top of
 `envs/stilt_g1/__init__.py`. They are display scales, not engineering limits.
@@ -125,7 +125,7 @@ Bar scales live in `SECTION_LIMIT` and `CAPSULE_LIMIT_N` at the top of
 ### Joint Torque Monitor
 
 A live **Joint Torques** folder shows two metrics at 10 Hz for hip pitch and
-knee joints (the ankles no longer exist as joints):
+knee joints:
 
 **`qfrc_actuator` (PD output, clamped at `forcerange`):**
 ```
@@ -196,13 +196,78 @@ ankle_roll_link
             └── *_stilt_plate  0.565 kg   ground plate + 8 contact capsules + tip site
 ```
 
-**The ankle joints are deleted.** The brace rigidly clamps the shank, so ankle
-pitch and roll cannot move. The `ankle_pitch_link` / `ankle_roll_link` *bodies*
-remain (the `foot_swing_height` contact subtree and every geom/site path depend
-on them), but the joints and `G1_ACTUATOR_ANKLE` are gone: **action space
-29 → 25**. Consequence: shank orientation is rigidly `hip_pitch + knee`, so the
-stilt is upright only when `hip_pitch = −knee`, and there is no ankle balance
-strategy at all. Expect training to be markedly harder than Run 5.
+## Two morphologies, one policy (2026-08-13 onwards)
+
+**The robot is always the stock 29-DoF G1, with its own feet and all four ankle
+joints actuated.** The stilts bolt on and come off; nothing is ever done to the
+real ankle motors to hold them straight. An earlier reading of the shank brace as
+a rigid weld deleted the ankle joints and dropped the action space to 25 — that
+was wrong, and it is why **Runs 6 and 7 are invalid**.
+
+Every episode draws one of two morphologies, at `fitted_probability` 0.5, and one
+policy has to handle both. Five things move together per draw, all in
+`reset_stilts_fitted` in [`envs/stilt_g1/events.py`](envs/stilt_g1/events.py):
+
+| | stilts ON | stilts OFF |
+|---|---|---|
+| stilt segment mass | as sampled by the mass curriculum | ×0.001 |
+| stilt contact capsules | live | parked +6 m |
+| ground contact | 16 stilt capsules | the robot's 14 foot capsules |
+| `*_stilt_tip` sites | at the stilt plate, −0.4425 | slid up to the sole, −0.035 |
+| ankle joint stiffness | 150–2000 Nm/rad (the brace) | 0 |
+| pelvis spawn height | 1.1977 m | 0.7902 m |
+| standing pose | **the same for both** — see below | |
+
+**One pose, not two, and this is load-bearing.** `JointPositionActionCfg` offsets
+actions from the keyframe, and the `pose` reward is keyed on it, so a zero action
+commands the keyframe pose. The stilts-fitted case has no freedom in what that
+pose can be — the post is perpendicular to the sole and clamped parallel to the
+shank, so the stilt stands upright only at `hip_pitch = −knee` with the ankle at
+the brace's neutral angle (zero). The bare robot therefore uses that pose too,
+even though the stock G1 crouch would suit it better alone. Splitting them makes
+the neutral action a *falling* pose on stilts: a 60-iteration smoke run collapsed
+from 35 to 16 mean episode length while the return rose — the signature of a
+policy learning that ending the episode beats standing up.
+
+Four more consequences worth holding onto:
+
+- **The brace is joint stiffness, not a weld.** The spring pulls the ankle toward
+  zero, which is the angle the MJCF assembles the mount and brace at. That is also
+  why the fitted standing pose needs the shank vertical: the post is
+  perpendicular to the sole, so the stilt is only upright when `hip_pitch + knee = 0`.
+  Spawning a fitted env in the stock ankle pose would fight a spring worth
+  hundreds of Nm.
+- **The policy is not told which mode it is in.** It gets 5 frames of observation
+  history (`STILT_OBS_HISTORY`, actor obs 495 wide) and has to infer the
+  morphology from the dynamics. Nothing in the observation is unavailable on
+  hardware.
+- **Both contact sets must be collidable.** `CollisionCfg.disable_other_geoms`
+  defaults to `True`, so any geom missing from `geom_names_expr` gets `contype`
+  and `conaffinity` zeroed. Listing only the stilt capsules switched the robot's
+  own feet off and the bare envs fell silently through the floor — still logging
+  as upright, because a free-falling torso is perfectly vertical. Pinned by
+  `test_both_contact_sets_can_actually_collide`.
+- **Anything with a length scale needs two values.** `torso_too_low` has two
+  floors, in [`envs/stilt_g1/terminations.py`](envs/stilt_g1/terminations.py) —
+  the morphologies stand 44 cm apart, and 0.65 m is a collapsed stilt walker but
+  a perfectly ordinary squat for the bare robot. Anything the *policy* keys on,
+  by contrast, must be shared, for the reason above.
+
+Both spawn heights are solved, never hand-tuned:
+
+```sh
+uv run python scripts/solve_spawn_height.py
+```
+
+### Reading the training curves
+
+The aggregate metrics cannot tell "walks on stilts, falls over without them" from
+"mediocre at both". [`envs/stilt_g1/metrics.py`](envs/stilt_g1/metrics.py) logs
+masked per-mode versions — divide by `stilts_fitted_fraction` (or
+`1 − fraction`) to get the conditional mean:
+
+- `Episode_Metrics/vel_error_stilts_{on,off}`
+- `Episode_Metrics/upright_stilts_{on,off}`
 
 ## Stilt mass and height curricula
 
@@ -222,10 +287,19 @@ multiplier applied to all ten stilt bodies: `mass = 2.8 × e^(2α)` per stilt.
 
 Height DR moves `*_stilt_post_inner` with `shared_random=True` (both stilts are
 set to the same length on real hardware). **`scene.reset()` applies the keyframe
-*before* reset events run**, so the spawn height cannot see the sampled length;
-`reset_stilt_spawn_height` in `envs/stilt_g1/events.py` runs after the height
-term and corrects the root pose. That ordering is load-bearing — it depends on
-`cfg.events` dict insertion order. Verify with:
+*before* reset events run**, so the keyframe can know neither the sampled length
+nor which morphology was drawn. Three reset events fix that up, and they must run
+in this order:
+
+```
+reset_base → stilt_mass → stilt_height → stilts_fitted → stilt_spawn_height
+```
+
+`stilts_fitted` scales whatever mass `stilt_mass` sampled, so the reverse order
+silently restores the full mass in every fitted env. `stilt_spawn_height` needs
+both the morphology and the sampled length. The ordering is nothing more than
+`cfg.events` dict insertion order — it is load-bearing and covered by tests.
+Verify the whole chain with:
 
 ```sh
 uv run python scripts/check_height_dr.py
@@ -240,11 +314,21 @@ overlap is confirmed (assumed 80 mm, which would allow up to 522 mm).
 uv run pytest tests/ -q
 ```
 
-Covers the mesh/inertia generator, the MJCF topology and geometry, the robot
-config, the height-DR spawn correction, the env wiring, and the section-load
-statics. Run these before any commit touching the stilt model — several of them
-encode invariants that are easy to break silently (contact geom names, tip site
-height, monotonic axial load, event ordering).
+51 tests covering the mesh/inertia generator, the MJCF topology and geometry, the
+robot config and both standing poses, the reset chain for both morphologies, the
+env wiring, and the section-load statics. Run these before any commit touching
+the stilt model — several encode invariants that are easy to break silently
+(contact geom names, tip site height, monotonic axial load, event ordering, the
+two fall floors).
+
+`tests/test_stilt_reset.py` is the one to watch. It builds a real env and checks
+that both morphologies get drawn, spawn at their own height, and carry the right
+mass, tip sites and ankle stiffness. It also pins the stale-cached-read
+regression that once looked like a training collapse.
+
+**Do not write sim state under `torch.inference_mode()` in tests.** Buffers
+written inside it become inference tensors, and the next out-of-mode write —
+including the following test's `env.reset()` — raises. Use `torch.no_grad()`.
 
 ## Training
 
@@ -254,10 +338,10 @@ uv run python scripts/train_stilt.py
 
 Checkpoints land in `logs/rsl_rl/stilt_g1_velocity/<timestamp>/`.
 
-**The Run 5 checkpoint (2026-04-27_14-48-06) is invalid** for the current model:
-different action space, mass, inertia, height and stance. A fresh run is
-required, and `deploy/config/g1_stilt/deploy.yaml` must be regenerated from the
-new ONNX metadata before any hardware deployment.
+**Every checkpoint before Run 8 is invalid.** Run 5 predates the new stilt
+entirely; Runs 6 and 7 trained a 25-DoF policy for a robot with no ankle joints,
+which is not the hardware. `deploy/config/g1_stilt/deploy.yaml` must be
+regenerated from the Run 8 ONNX metadata before any hardware deployment.
 
 ## Code style
 

@@ -17,22 +17,34 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
-# Run 7: from scratch (no --agent.resume; it defaults to False).
+# Run 8: from scratch (no --agent.resume; it defaults to False).
 #
-# Changed vs Run 6, which balanced well (983/1000 steps, zero falls) but
-# converged to a single ~0.35 m/s gait, froze above ~0.7 m/s and could not turn:
-#   * air_time reward 0.0 -> 0.5, command_threshold 0.5 -> 0.3
+# Runs 6 and 7 are VOID. They trained a 25-DoF policy for a robot with its ankle
+# joints deleted, on the reading that the shank brace welds the ankle. The
+# hardware is always the stock 29-DoF G1; the stilts bolt on and come off. Run 8
+# is the first run against the real robot, so resuming was never an option.
+#
+# What Run 8 trains, all in envs/stilt_g1/, not here:
+#   * ONE policy for BOTH morphologies — each episode draws stilts on or off at
+#     50/50 (events.py: reset_stilts_fitted)
+#   * ankles present and actuated; the brace is joint stiffness, 150-2000 Nm/rad,
+#     applied only in the fitted envs
+#   * 5 frames of actor observation history, so the policy can infer which
+#     morphology it is in. It is NOT told.
+#   * per-morphology standing pose, spawn height and torso_too_low floor
+#
+# Carried over from Run 7, which fixed Run 6's frozen ~0.35 m/s gait:
+#   * air_time reward 0.5, command_threshold 0.3
 #   * command curriculum capped at 0.8 m/s forward instead of ramping to 2.0
-# Both live in envs/stilt_g1/env_cfgs.py, not here.
 #
-# From scratch rather than resuming Run 6: adding a reward term invalidates the
-# critic, and Run 6 sat in a degenerate local optimum that fine-tuning would
-# likely preserve.
+# Watch Episode_Metrics/{vel_error,upright}_stilts_{on,off}: the aggregate cannot
+# tell "walks on stilts, falls over without them" from "mediocre at both".
+# Divide by stilts_fitted_fraction for the conditional mean. See metrics.py.
 export CUDA_VISIBLE_DEVICES=0
 uv run python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 6000 \
-    --agent.run-name run7-airtime-cappedcmd \
+    --agent.run-name run8-stilts-on-off \
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
     --agent.upload-model False \

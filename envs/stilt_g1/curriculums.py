@@ -133,14 +133,16 @@ class stilt_height_curriculum:
 class stilt_termination_curriculum:
   """Loosen the fall terminations early, then tighten to their final values.
 
-  With the ankle welded the robot cannot stand passively, so early in training
-  every episode ends in a fall. Terminating at the final thresholds from step
-  zero gives episodes too short to discover balance at all — the policy learns
-  to fall immediately instead. Starting permissive buys the episode length
-  needed to stumble and recover, then tightens back to the real limits.
+  On stilts the robot cannot stand passively, so early in training every episode
+  ends in a fall. Terminating at the final thresholds from step zero gives
+  episodes too short to discover balance at all — the policy learns to fall
+  immediately instead. Starting permissive buys the episode length needed to
+  stumble and recover, then tightens back to the real limits.
 
   Stages define ``step`` thresholds plus the target ``limit_angle`` (rad, for
-  ``fell_over``) and ``minimum_height`` (m, for ``torso_too_low``).
+  ``fell_over``) and the two ``torso_too_low`` floors, ``height`` for envs with
+  the stilts off and ``fitted_height`` for those with them on. Two floors
+  because the morphologies stand 44 cm apart — see envs/stilt_g1/terminations.py.
   """
 
   def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
@@ -169,9 +171,11 @@ class stilt_termination_curriculum:
         active = stage
 
     self._fell_over.params["limit_angle"] = active["limit_angle"]
-    self._torso_too_low.params["minimum_height"] = active["minimum_height"]
+    self._torso_too_low.params["minimum_height"] = active["height"]
+    self._torso_too_low.params["fitted_minimum_height"] = active["fitted_height"]
 
     return {
       "fell_over_limit_angle_rad": torch.tensor(active["limit_angle"]),
-      "torso_min_height_m": torch.tensor(active["minimum_height"]),
+      "torso_min_height_m": torch.tensor(active["height"]),
+      "torso_min_height_fitted_m": torch.tensor(active["fitted_height"]),
     }

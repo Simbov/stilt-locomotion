@@ -17,13 +17,39 @@ def _body_id(model, name):
   return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
 
 
-def test_ankle_joints_are_gone(stilt_model):
+def test_ankle_joints_are_present(stilt_model):
+  """The robot is always the stock 29-DoF G1 — the stilts bolt on and come off.
+
+  Runs 6 and 7 deleted these joints on a misreading of the brace; that is why
+  both are invalid. This test exists so the mistake cannot recur silently.
+  """
   model, _ = stilt_model
   names = {
     mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(model.njnt)
   }
-  offenders = {n for n in names if n and "ankle" in n}
-  assert not offenders, f"ankle joints still present: {offenders}"
+  for side in ("left", "right"):
+    for dof in ("pitch", "roll"):
+      assert f"{side}_ankle_{dof}_joint" in names
+
+
+def test_robot_has_29_actuated_joints(stilt_model):
+  model, _ = stilt_model
+  names = [
+    mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(model.njnt)
+  ]
+  hinges = [n for n in names if n and n != "floating_base_joint"]
+  assert len(hinges) == 29, f"expected 29 actuated joints, got {len(hinges)}"
+
+
+def test_the_robots_own_feet_are_live(stilt_model):
+  """With the stilts off the robot walks on these, so they must collide."""
+  model, _ = stilt_model
+  names = {
+    mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i) for i in range(model.ngeom)
+  }
+  for side in ("left", "right"):
+    for i in range(1, 8):
+      assert f"{side}_foot{i}_collision" in names
 
 
 def test_ankle_links_survive(stilt_model):
@@ -40,7 +66,7 @@ def test_all_segment_bodies_exist(stilt_model):
       assert _body_id(model, f"{side}_{segment}") >= 0, f"{side}_{segment}"
 
 
-def test_segments_add_no_degrees_of_freedom(stilt_model):
+def test_stilt_segments_add_no_degrees_of_freedom(stilt_model):
   model, _ = stilt_model
   for side in SIDES:
     for segment in SEGMENT_BODIES:

@@ -4,23 +4,33 @@ import mujoco
 import pytest
 
 from envs.stilt_g1.loads import SECTIONS, contact_forces, section_loads
-from envs.stilt_g1.stilt_robot import STILT_KNEE_ANGLE, STILT_SPAWN_HEIGHT
+from envs.stilt_g1.stilt_robot import (
+  STILT_FITTED_SPAWN_HEIGHT,
+  STILT_LEG_POSE,
+)
 
 
 @pytest.fixture(scope="module")
 def standing():
   """Rest the robot vertically on a floor so the stilts carry its full weight.
 
-  This is a statics rig, not a locomotion test. Two departures from the real
-  model, both deliberate:
+  This is a statics rig, not a locomotion test. Three departures from the real
+  model, all deliberate:
 
   * The project MJCF has no ground plane — mjlab supplies the terrain — so one
     is added here.
-  * The pelvis free joint is replaced by a single vertical slide. With the
-    ankles welded the robot cannot balance passively and would simply topple,
+  * The pelvis free joint is replaced by a single vertical slide. The robot
+    cannot balance passively without a controller and would simply topple,
     which tells us nothing about section loads. Constraining it to sink
     vertically means the ground reaction must equal total weight at rest, which
     is exactly the invariant these tests check.
+  * Every joint gets a stiff position actuator, including the ankles. On the
+    real hardware the brace does that job — the sim models it as ankle joint
+    stiffness applied at reset (see reset_stilts_fitted); here a held actuator
+    is the simpler equivalent and the load path through the stilt is the same.
+
+  The pose is the fitted standing pose: shank vertical, ankle at the brace's
+  neutral angle, which is the only pose the assembled stilt stands upright in.
   """
   from tests.conftest import G1_XML
 
@@ -47,16 +57,15 @@ def standing():
   model = spec.compile()
   data = mujoco.MjData(model)
 
-  hold = {"hip_pitch": -STILT_KNEE_ANGLE, "knee": STILT_KNEE_ANGLE}
   for side in ("left", "right"):
-    for joint, value in hold.items():
+    for joint, value in STILT_LEG_POSE.items():
       jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{side}_{joint}_joint")
       data.qpos[model.jnt_qposadr[jid]] = value
       aid = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{side}_{joint}_joint"
       )
       data.ctrl[aid] = value
-  data.qpos[0] = STILT_SPAWN_HEIGHT
+  data.qpos[0] = STILT_FITTED_SPAWN_HEIGHT
 
   for _ in range(8000):
     mujoco.mj_step(model, data)

@@ -3,10 +3,11 @@
 Computed in Python from contact forces and segment inertia, so this does not
 depend on mujoco_warp implementing force/torque sensors.
 
-Limitation: with the ankle joints deleted, shank and foot are one rigid body,
-so the split of the interface load between the sole bolts and the shank clamp
-is statically indeterminate. ``stilt_brace`` therefore reports its own inertial
-load only — NOT the real clamp reaction. Label it as such wherever it is shown.
+Limitation: the stilt bolts to the sole AND clamps the shank, so the interface
+load has two parallel paths and the split between them is statically
+indeterminate — the sim gives the total wrench only. ``stilt_brace`` therefore
+reports its own inertial load, NOT the real clamp reaction. Label it as such
+wherever it is shown. Sizing the brace needs a hand calculation or FEA.
 """
 
 from __future__ import annotations

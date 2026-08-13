@@ -1,25 +1,31 @@
 # ============================================================================
-# SUPERSEDED — DO NOT DEPLOY AS-IS.  (2026-08-07)
+# SUPERSEDED — DO NOT DEPLOY AS-IS.  (last reviewed 2026-08-13)
 #
 # Every value below was generated from the Run 5 ONNX metadata
-# (2026-04-27_14-48-06), which was trained against the OLD single-box stilt
-# with free ankles. The new telescoping shank-clamped stilt changes the model
-# incompatibly:
+# (2026-04-27_14-48-06), which was trained against the OLD single-box stilt.
+# Three later changes each invalidate it on their own:
 #
-#   * The four ankle joints are deleted (the brace clamps the shank), so the
-#     action vector is 25, not 29, and every per-joint array below is the
-#     wrong length.
-#   * Stilt mass is 2.8 kg per side, not 1.5 kg, with real segment inertia.
-#   * Standing pose changed: hip_pitch = -knee = -0.30, no ankle_pitch term.
+#   * Stilt mass is 2.8 kg per side, not 1.5 kg, with real segment inertia,
+#     and the telescope height is randomised.
+#   * The policy now takes 5 FRAMES of observation history — 495 inputs, not
+#     99 — because it must infer from the dynamics whether the stilts are
+#     fitted. The runtime has to buffer and flatten that history.
+#   * The standing pose is now hip_pitch -0.10 / knee 0.10 / ankle 0 — shank
+#     vertical, the only pose the assembled stilt stands upright in. It is the
+#     same with the stilts off, so default_joint_pos below is wrong for the legs.
 #
-# The Run 5 checkpoint is therefore INVALID for this robot. This file must be
-# regenerated wholesale from the new ONNX metadata after retraining — the PD
+# The joint ordering and the 29-DOF action vector below are still correct —
+# the robot is always the stock 29-DoF G1. (An earlier revision of this header
+# claimed the ankle joints were deleted and the action vector was 25. That was
+# never the hardware; Runs 6 and 7 were trained on that mistake and are void.)
+#
+# This file must be regenerated wholesale from the Run 8 ONNX metadata — the PD
 # gains, action scales and offsets are all read out of the trained policy and
 # cannot be hand-derived. Nothing here has been edited to "look right", because
 # a plausible-but-wrong deployment config is worse than an obviously stale one.
 #
-# See also deploy/README.md § "Ankle handling (stilt hardware)" — the ankle
-# motors must be put in damping mode before running the new policy.
+# See also deploy/README.md § "Ankle handling (stilt hardware)": the ankle
+# motors stay in normal PD position mode.
 # ============================================================================
 #
 # Deployment config for Stilt G1 velocity policy

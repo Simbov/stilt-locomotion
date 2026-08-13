@@ -1,30 +1,56 @@
 # Stilt Locomotion — Future Work
-**Last updated: 2026-04-18**
+**Last updated: 2026-08-13**
 
 ---
 
-## Immediate (Run 5 — Ready to Submit)
+## Now — Run 8, one policy for stilts on and off
 
-```bash
-# On HPC
-git pull && qsub scripts/train_stilt.pbs
-```
+See `STATUS.md` for the design. What is genuinely unknown going in, in the order
+it is likely to bite:
 
-**What to look for in W&B after 500 iterations:**
-- `mean_episode_length` increasing (>50 steps = robot learning to balance)
-- `torso_too_low` NOT dominant — `time_out` should start appearing by iter 1000
-- `track_linear_velocity` increasing from near-zero
-- `Curriculum/stilt_mass/stilt_mass_min_kg` and `max_kg` stepping up at iters 1000/2000/4000
+1. **Can one policy do both?** The two morphologies differ by 44 cm of leg and
+   2.8 kg per side. If it converges to one mode and abandons the other, the split
+   metrics will show it early: watch `Episode_Metrics/upright_stilts_{on,off}`
+   diverge. Fallbacks, cheapest first — raise the observation history above 5
+   frames, then bias `fitted_probability` toward whichever mode is losing, then
+   accept two policies and a switch.
+2. **Is the brace stiffness range right?** 150–2000 Nm/rad is a guess. Nobody has
+   measured the real clamp. If the hardware turns out stiffer than 2000, the
+   ankles will do more static work than training predicted — watch their
+   temperature on the first stilted runs.
+3. **Minimum safe tube overlap** is still assumed at 80 mm, which caps the height
+   curriculum at ±50 mm. Confirm it and the range could go to 522 mm.
 
-If still stuck at 13-step episodes — lower `torso_too_low` to 0.50 m or remove it entirely.
+After Run 8 has a checkpoint: regenerate the structural report
+(`scripts/analyse_stilt_loads.py`) — the published one was sampled from the void
+Run 7 policy — and regenerate `deploy/config/g1_stilt/deploy.yaml` from the new
+ONNX metadata.
 
 ---
 
-## Phase 1 — Get the Robot Walking (Short Stilts, Fixed Mass)
+## ✅ DONE — Run 5 complete, robot walks (Phase 1 achieved)
 
-1. **Confirm 0.435 m stilt training converges**
-   - Target: `mean_episode_length` > 500 by iteration 1000
-   - Target: `track_linear_velocity` > 0.5 by iteration 3000
+Run `2026-04-27_14-48-06` (6000 iters, mjlab v1.3) converged to a stable walking gait.
+See `STATUS.md` → *Run 5 results* for the full metrics. Headlines:
+- `mean_episode_length` 13 → **985** (survives near-full episodes; ends by `time_out`, not falls)
+- `track_linear_velocity` reward → **1.31** (target was >0.5 by iter 3k)
+- `fell_over` termination ≈ **0**
+- Stilt mass curriculum swept to the full **0.5–6.0 kg** range without collapse
+
+**Next actions now that it walks** (roughly in priority order):
+1. Tune the late-training reward decline (`mean_reward` 49→33 as mass range widened) — try a
+   gentler final curriculum stage or a longer hold at each stage.
+2. Move to Phase 4 reward engineering (re-enable `air_time`, raise `foot_clearance`).
+3. Deploy the Run 5 stilt ONNX to hardware (Phase 6 — infra already in place).
+4. Start the Phase 3 stilt-length curriculum.
+
+---
+
+## Phase 1 — Get the Robot Walking (Short Stilts, Fixed Mass) — ✅ COMPLETE
+
+1. **Confirm 0.435 m stilt training converges** — ✅ done (run 5)
+   - Target: `mean_episode_length` > 500 by iteration 1000 → **met (~921 at iter 1k)**
+   - Target: `track_linear_velocity` > 0.5 by iteration 3000 → **met (~1.47 at iter 3k)**
 
 2. **Once walking, tune reward weights for stilt dynamics**
    - Enable `air_time` reward (weight = 0.5–1.0) — stilts need a clear lift-and-plant rhythm
@@ -42,14 +68,18 @@ If still stuck at 13-step episodes — lower `torso_too_low` to 0.50 m or remove
 
 ---
 
-## Phase 2 — Stilt Mass Curriculum (Active from Run 5)
+## Phase 2 — Stilt Mass Curriculum — ✅ RESULT IN
 
-The mass curriculum is already running. After Run 5 completes:
+Run 5 completed the full curriculum. **The policy stayed stable across the entire
+sweep to 0.5–6.0 kg per stilt with `fell_over` ≈ 0** — up to 4× the 1.5 kg baseline.
+So the acceptable stilt-weight range for mechanical design is generously wide; mass is
+**not** the binding constraint. (Watch item: the mild late `mean_reward` decline coincides
+with the widest mass stage — the gait holds but may be slightly conservative at the top end.)
 
-1. **Read the mass limit from training results**
-   - If the policy converges well to iter 4000, the robot can handle ~0.25–2.0 kg
-   - If training degrades at step 2000–4000, the upper bound is closer to 1.0 kg
-   - Use `Curriculum/stilt_mass/stilt_mass_max_kg` in W&B to track the active ceiling
+Remaining Phase 2 follow-ups:
+
+1. ~~Read the mass limit from training results~~ → **done: robust to ~6 kg/stilt.**
+   - Use `Curriculum/stilt_mass/stilt_mass_max_kg` in the tfevents/W&B to track the active ceiling.
 
 2. **Interpret for mechanical design**
    - The mass range the policy handles robustly = acceptable stilt weight range
@@ -170,4 +200,4 @@ For a new training run, only step 1–2 need repeating.
 | Stilt inertia is a rough estimate | `assets/mjcf/g1/g1.xml:129` | mass=0.5 kg, inertia=diag(0.008,0.008,0.001) — measure physical stilt |
 | Stilt tip sites hardcoded in MJCF | `assets/mjcf/g1/g1.xml:141` | Will need updating for length curriculum |
 | Air time reward disabled | `envs/stilt_g1/env_cfgs.py:54` | Re-enable at weight=0.5 once robot walks |
-| Mass curriculum upper bound (2.0 kg) unvalidated | `envs/stilt_g1/env_cfgs.py:91` | May need adjusting based on Run 5 results |
+| ~~Mass curriculum upper bound unvalidated~~ | `envs/stilt_g1/env_cfgs.py:91` | ✅ validated by run 5 — stable to 6.0 kg/stilt |
