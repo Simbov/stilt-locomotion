@@ -449,9 +449,27 @@ Run 8 onwards trains a single policy that walks with the stilts fitted and with
 them removed. It is **not** told which — it infers the morphology from 5 frames of
 observation history. Two things follow for deployment:
 
-- The runtime must buffer 5 frames of the 99-dim observation and feed the policy
-  the flattened 495-dim history, oldest first. A single-frame runtime will not
-  work with this policy.
+- The runtime must buffer 5 frames of observation and feed the policy a 495-dim
+  vector. A single-frame runtime will not work with this policy.
+
+  **The layout is per-term, not per-frame.** This is the easy thing to get
+  wrong: the vector is *not* five 99-dim frames concatenated. Each observation
+  term contributes all five of its frames contiguously, oldest first, in term
+  order:
+
+  | offset | term | layout |
+  |---|---|---|
+  | 0:15 | `base_lin_vel` | 5 frames × 3 |
+  | 15:30 | `base_ang_vel` | 5 × 3 |
+  | 30:45 | `projected_gravity` | 5 × 3 |
+  | 45:190 | `joint_pos` | 5 × 29 |
+  | 190:335 | `joint_vel` | 5 × 29 |
+  | 335:480 | `actions` | 5 × 29 |
+  | 480:495 | `command` | 5 × 3 |
+
+  Within each block, index 0 is the OLDEST frame and index 4 the newest. Getting
+  this wrong produces a policy that runs without error and walks badly, so
+  verify it against a recorded sim rollout before putting weight on it.
 - No configuration switch is needed when the stilts come on or off, and there is
   no "stilt mode" flag to set. Fit them or don't; the policy adapts within a few
   control steps. Expect the first few steps after a change to be the shakiest.

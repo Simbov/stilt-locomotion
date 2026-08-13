@@ -1,9 +1,76 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-08-13**
+**Last updated: 2026-08-14**
 
 ---
 
-## ⚠️ Runs 6 and 7 are void — the ankles are never welded
+## ✅ Run 8 complete — one policy walks with the stilts on AND off
+
+`2026-08-13_20-35-42_run8-stilts-on-off`, 6000 iterations, 4096 envs, 2h36m.
+**The two-morphology goal is met.** A single policy, never told which
+configuration it is in, walks in both and never falls in either.
+
+Measured by pinning the morphology and holding fixed commands —
+`scripts/eval_both_modes.py`, 5 fresh episodes per command, 80 episodes total:
+
+| command | stilts ON achieved | stilts OFF achieved |
+|---|---|---|
+| vx 0.2 | 0.235 | 0.210 |
+| vx 0.4 | 0.413 | 0.386 |
+| vx 0.6 | 0.445 | 0.465 |
+| vx 0.8 | 0.785 | 0.557 |
+| vx −0.4 | −0.247 | −0.265 |
+| vy 0.4 | 0.303 | 0.253 |
+| yaw 0.6 | 0.316 (sd 0.177) | 0.326 (sd 0.373) |
+| **mean planar error** | **0.088 m/s** | **0.094 m/s** |
+| **falls** | **0 / 40** | **0 / 40** |
+
+The two columns are statistically indistinguishable, which is the result that
+matters: it did not solve one morphology and coast on the other. Pelvis height
+held at 1.195–1.201 m fitted and 0.785–0.788 m bare across every command — no
+sag, no creeping collapse.
+
+Training-curve confirmation, conditional means from the masked metrics:
+
+| | stilts ON | stilts OFF |
+|---|---|---|
+| `upright` | 0.9986 | 0.9989 |
+| `vel_error` | 0.250 | 0.194 |
+
+Final aggregates: episode length 994.8/1000, `fell_over` 0.002, `torso_too_low`
+0.053, mean reward 63.4. Every curriculum completed — mass to 7.61 kg per stilt,
+telescope to 458 mm, terminations tightened to the final 1.2217 rad / 0.65 m /
+0.45 m.
+
+### What is still weak
+
+1. **Yaw undershoots by roughly half and is erratic.** 0.6 commanded gives ~0.32
+   in both modes, and the episode-to-episode spread is large — sd 0.373 off the
+   stilts, wider than the mean itself, so individual episodes can read as barely
+   turning or turning the wrong way. This is a weakness in every run since Run 5,
+   improved but not solved. **Do not read a single episode as a sign error** — it
+   takes several to see the mean.
+2. **Forward response is not monotonic.** Both modes dip at 0.6 (0.445 / 0.465)
+   and the bare robot saturates at ~0.56 for a 0.8 command, while the stilted one
+   reaches 0.785. Longer legs give a longer stride, so the stilts being *faster*
+   at the top end is plausible rather than suspicious, but the dip at 0.6 looks
+   like a gait transition worth looking at in the viewer.
+3. **Backward undershoots ~35%** in both modes (−0.25 / −0.27 for −0.4).
+
+None of these are blockers for hardware; all three are command-tracking quality,
+not stability.
+
+### Next
+
+- Regenerate the structural report off this checkpoint — the published one was
+  sampled from the void Run 7 policy:
+  `uv run python scripts/analyse_stilt_loads.py --checkpoint logs/rsl_rl/stilt_g1_velocity/2026-08-13_20-35-42_run8-stilts-on-off/model_5999.pt`
+- Regenerate `deploy/config/g1_stilt/deploy.yaml` from the new ONNX metadata.
+  **Note the observation layout is per-term, not per-frame** — see
+  `deploy/README.md`, it is the easiest thing to get wrong.
+
+---
+
+## ⚠️ Runs 6 and 7 are void — the ankles are never welded (background)
 
 Runs 6 and 7 trained a **25-DoF** policy for a robot whose ankle joints had been
 deleted, on the reading that the shank brace rigidly clamps the calf. **That robot
@@ -16,7 +83,7 @@ the structural report — they were sampled from the Run 7 policy. The report's
 geometry and material sections came from the CAD and still stand; regenerate the
 loads with `scripts/analyse_stilt_loads.py` once Run 8 has a checkpoint.
 
-## Run 8 — one policy, stilts on and off
+## Run 8 design — one policy, stilts on and off
 
 The task Run 8 trains is deliberately harder than anything before it: **a single
 policy that walks with the stilts fitted and with them removed**, without being
