@@ -164,6 +164,34 @@ def test_both_contact_sets_can_actually_collide(env):
     )
 
 
+def test_removing_the_stilts_parks_the_VISUAL_meshes_too(env):
+  """Not just the contact capsules — the meshes as well.
+
+  The stilt visual geoms are UNNAMED in the MJCF, so a name-based filter skips
+  all ten of them. Physically that is harmless (visual geoms do not collide),
+  but the bare robot then renders wearing ghost stilts sunk through the floor,
+  which makes every video and viewer session misleading. Select by parent body.
+  """
+  env.reset()
+  robot = env.scene["robot"]
+  ids, visual = [], 0
+  for i, geom in enumerate(robot.indexing.geoms):
+    parent = geom.parent.name.split("/")[-1] if geom.parent is not None else ""
+    if "stilt" not in parent:
+      continue
+    ids.append(int(robot.indexing.geom_ids[i]))
+    visual += int(not (geom.name or "").endswith("_collision"))
+
+  assert visual == 10, f"expected 10 stilt visual meshes, found {visual}"
+  z = env.sim.model.geom_pos[:, ids, 2]
+  fitted = env.stilt_fitted.bool()
+  assert float(z[fitted].max()) < 1.0, "fitted stilt geoms are not on the robot"
+  assert float(z[~fitted].min()) > 1.0, (
+    "removed stilt geoms are still on the robot — the bare robot will render "
+    "with stilts attached"
+  )
+
+
 def test_the_tip_site_follows_whichever_sole_is_live(env):
   """foot_height, foot_clearance and foot_slip all read these sites."""
   env.reset()

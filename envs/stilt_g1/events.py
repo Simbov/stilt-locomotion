@@ -109,7 +109,6 @@ def reset_stilts_fitted(
   env.stilt_fitted[env_ids] = fitted
 
   body_names = [b.name.split("/")[-1] for b in asset.indexing.bodies]
-  geom_names = [g.name.split("/")[-1] for g in asset.indexing.geoms]
   site_names = [s.name.split("/")[-1] for s in asset.indexing.sites]
   joint_names = list(asset.joint_names)
 
@@ -127,11 +126,20 @@ def reset_stilts_fitted(
       sim.model.body_mass[env_ids, bid] *= scale
       sim.model.body_inertia[env_ids, bid] *= scale.unsqueeze(-1)
 
-  # 2. Park the stilt contact capsules when the stilts are off.
+  # 2. Park every stilt geom when the stilts are off — the contact capsules so
+  #    the robot's own feet take the ground, and the visual meshes so the render
+  #    matches reality.
+  #
+  #    Selected by PARENT BODY, not by name. The visual meshes are unnamed in
+  #    the MJCF (`<geom class="visual" mesh="stilt_plate"/>`), so a name filter
+  #    silently skips all ten of them and the "stilts off" robot renders wearing
+  #    ghost stilts sunk through the floor. Harmless physically — visual geoms
+  #    do not collide — but it makes every video and viewer session misleading.
   park = torch.tensor(_PARK_OFFSET_M, device=env.device)
   removed = (1.0 - fitted).unsqueeze(-1)
-  for i, gname in enumerate(geom_names):
-    if "stilt" not in gname or not gname.endswith("_collision"):
+  for i, geom in enumerate(asset.indexing.geoms):
+    parent = geom.parent.name.split("/")[-1] if geom.parent is not None else ""
+    if "stilt" not in parent:
       continue
     gid = int(asset.indexing.geom_ids[i])
     sim.model.geom_pos[env_ids, gid] = sim.get_default_field("geom_pos")[gid] + (
