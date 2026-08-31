@@ -161,10 +161,16 @@ def render_yaml(meta: dict[str, str], run_dir: Path, obs_offsets: list[tuple]) -
   for term, a, b, width in obs_offsets:
     runtime = RUNTIME_TERM_NAME[term]
     ones = ", ".join(["1.0"] * width)
-    params = "\n    params: {command_name: twist}" if term == "command" else ""
+    # Every term carries an explicit `params:` key. The runtime decides
+    # whether the observations block is one group or several by testing
+    # `cfg.begin()->second["params"].IsDefined()`; without it the first term
+    # name is read as a GROUP name and startup throws.
+    params = "{command_name: base_velocity}" if term == "command" else "{}"
     obs_block.append(
       f"  # [{a}:{b}] — {TERM_NOTE[term]}\n"
-      f"  {runtime}:{params}\n"
+      f"  {runtime}:\n"
+      f"    params: {params}\n"
+      f"    clip: null\n"
       f"    scale: [{ones}]\n"
       f"    history_length: {history}"
     )
@@ -226,7 +232,7 @@ damping: [
 # curriculum stage). Commanding beyond this is extrapolation: the policy
 # saturates rather than tracking, and it was never rewarded for trying.
 commands:
-  twist:
+  base_velocity:
     ranges:
       lin_vel_x:  [-0.6, 0.8]
       lin_vel_y:  [-0.5, 0.5]
@@ -243,6 +249,7 @@ actions:
 {fmt_rows(pose, names, 6)}
     ]
     clip: null
+    joint_ids: null
 
 # Observation normalisation is baked into the ONNX, so every scale is 1.0.
 # Do NOT add extra scaling here.
@@ -258,6 +265,11 @@ def main() -> None:
     "--out", type=Path, default=Path("deploy/config/g1_stilt/deploy.yaml")
   )
   parser.add_argument("--golden", type=int, default=3, help="Golden I/O pairs to write")
+  parser.add_argument(
+    "--config-only",
+    action="store_true",
+    help="Rewrite deploy.yaml only; leave reference_io.json alone.",
+  )
   args = parser.parse_args()
 
   onnx_files = sorted(args.run.glob("*.onnx"))
@@ -282,6 +294,9 @@ def main() -> None:
   args.out.parent.mkdir(parents=True, exist_ok=True)
   args.out.write_text(render_yaml(meta, args.run, offsets))
   print(f"wrote {args.out}")
+
+  if args.config_only:
+    return
 
   checkpoints = sorted(args.run.glob("model_*.pt"), key=lambda p: p.stat().st_mtime)
   pairs = golden_vectors(args.run, checkpoints[-1], args.golden)

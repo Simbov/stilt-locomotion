@@ -99,9 +99,43 @@ def test_every_observation_term_carries_the_history(config, metadata):
     )
 
 
+def test_command_key_is_the_one_the_runtime_looks_up(config):
+  """unitree_rl_mjlab hardcodes cfg["commands"]["base_velocity"]["ranges"].
+
+  See velocity_commands in isaaclab/envs/mdp/observations/observations.h. Any
+  other key (e.g. mjlab's own command name, "twist") leaves the lookup
+  undefined and the command clamp throws at the first control step.
+  """
+  assert "base_velocity" in config["commands"], (
+    "the command block must be keyed base_velocity, whatever mjlab called it"
+  )
+
+
+def test_every_observation_term_declares_params(config):
+  """The runtime decides group-vs-single by probing the first term's params.
+
+  ObservationManager::_prapare_terms tests
+  `cfg.begin()->second["params"].IsDefined()`. With no params on the first
+  term the whole observations block is read as a map of GROUPS, each term
+  name becomes a group name, and startup throws on the first key inside it.
+  """
+  for name, term in config["observations"].items():
+    assert "params" in term, f"{name} has no params key; the runtime needs one"
+
+
+def test_history_layout_flag_is_left_off(config):
+  """`use_gym_history: true` switches the runtime to a FRAME-major layout.
+
+  Our vector is TERM-major — each term's five frames contiguous, oldest
+  first — which is what the runtime does by default. Setting the flag
+  produces a policy that loads, runs, and walks badly.
+  """
+  assert "use_gym_history" not in config["observations"]
+
+
 def test_commands_do_not_exceed_what_was_trained(config):
   """Beyond the trained range the policy saturates rather than tracking."""
-  ranges = config["commands"]["twist"]["ranges"]
+  ranges = config["commands"]["base_velocity"]["ranges"]
   trained = {
     "lin_vel_x": (-0.6, 0.8),
     "lin_vel_y": (-0.5, 0.5),

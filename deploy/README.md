@@ -379,7 +379,37 @@ which maps to the runtime names above.
 The command section must use `base_velocity` as the key (not `twist`) because
 `velocity_commands` hardcodes `commands.base_velocity.ranges` in the C++ source.
 
+Every term must also carry an explicit `params:` key, even an empty one.
+`ObservationManager::_prapare_terms` decides whether the `observations:` block
+is a single group or a map of groups by testing
+`cfg.begin()->second["params"].IsDefined()`. Without it the block is read as
+groups, each term name becomes a *group* name, and startup throws on the first
+key inside it (`Observation term 'scale' is not registered.`). The stock Unitree
+configs all carry `params: {}` and `clip: null` on every term; ours now do too.
+
 All scales are 1.0 — obs normalisation is baked into the ONNX.
+
+### The 5-frame history needs no runtime change
+
+The stock runtime already produces exactly the layout this policy wants. Set
+`history_length: 5` on every term and leave `use_gym_history` **unset**:
+
+- `ObservationTermCfg::get()` concatenates that term's whole ring buffer,
+  oldest entry first (`std::deque`, oldest at the front).
+- `compute_group` walks the terms in YAML order and appends each one's block.
+
+That is term-major — every term's five frames contiguous — which is what mjlab
+flattens on the training side (`CircularBuffer.buffer` is documented
+oldest→newest). Setting `use_gym_history: true` switches the runtime to the
+frame-major layout instead, and the result loads, runs, and walks badly with no
+error. Pinned by `tests/test_deploy_config.py`.
+
+### The ONNX input tensor must be named `obs`
+
+`OrtRunner::act` looks the observation group up by the ONNX graph's input name
+and throws `Input name X not found in observations` otherwise. The single-group
+path names the group `obs`, and mjlab exports the input as `obs`. If a future
+export renames it, rename the group, not the model.
 
 ---
 
@@ -507,6 +537,21 @@ filling those slots with the right sensor values. For that, hold the robot in
 the standing pose, log one real observation, and compare it term by term against
 a reference pair — `projected_gravity` should be near `(0, 0, -1)`, `joint_pos`
 near zero (it is relative to `default_joint_pos`), and `base_ang_vel` near zero.
+
+### FixStand hands over into a different pose
+
+`R2 + A` switches from FixStand to the policy in one control step, and the two
+poses are not the same. FixStand's target (in `config/config.yaml`) is the stock
+G1 crouch — knee 0.3, ankle_pitch −0.2, shoulder_pitch 0.35, elbow 0.87 — while
+this policy's `default_joint_pos` is the shared stilt pose, knee 0.1, ankle 0,
+shoulder_pitch 0.2, elbow 0.6. The gains step at the same instant, from
+FixStand's kp 100/150 to the policy's 40.2/99.1.
+
+So expect a visible settle on the handover: the legs straighten by ~0.2 rad at
+the knee and the arms come down. Do it on the hoist the first time. If it is
+sharper than you like, copy `default_joint_pos` from `deploy.yaml` into the
+FixStand `qs` block on the robot so the two poses agree — that is a robot-side
+config edit, not a policy change, and it makes the transition a no-op.
 
 ### First bring-up, in order
 

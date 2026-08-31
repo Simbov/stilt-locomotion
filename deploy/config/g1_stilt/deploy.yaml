@@ -72,7 +72,7 @@ damping: [
 # curriculum stage). Commanding beyond this is extrapolation: the policy
 # saturates rather than tracking, and it was never rewarded for trying.
 commands:
-  twist:
+  base_velocity:
     ranges:
       lin_vel_x:  [-0.6, 0.8]
       lin_vel_y:  [-0.5, 0.5]
@@ -97,6 +97,7 @@ actions:
         0.200,  -0.200,   0.000,   0.600,   0.000,   0.000,   0.000  # right_shoulder
     ]
     clip: null
+    joint_ids: null
 
 # Observation normalisation is baked into the ONNX, so every scale is 1.0.
 # Do NOT add extra scaling here.
@@ -104,30 +105,43 @@ observations:
   # [0:15] — linear velocity in body frame. Requires the onboard estimator; if that
   # term is unavailable, register a zero-fill stub (see README).
   base_lin_vel:
+    params: {}
+    clip: null
     scale: [1.0, 1.0, 1.0]
     history_length: 5
   # [15:30] — angular velocity from the IMU gyroscope.
   base_ang_vel:
+    params: {}
+    clip: null
     scale: [1.0, 1.0, 1.0]
     history_length: 5
   # [30:45] — gravity projected into the body frame, from the IMU quaternion.
   projected_gravity:
+    params: {}
+    clip: null
     scale: [1.0, 1.0, 1.0]
     history_length: 5
   # [45:190] — encoder positions MINUS default_joint_pos.
   joint_pos_rel:
+    params: {}
+    clip: null
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
   # [190:335] — encoder velocities.
   joint_vel_rel:
+    params: {}
+    clip: null
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
   # [335:480] — previous raw policy output, before scale/offset.
   last_action:
+    params: {}
+    clip: null
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
   # [480:495] — joystick twist [vx, vy, yaw].
   velocity_commands:
-    params: {command_name: twist}
+    params: {command_name: base_velocity}
+    clip: null
     scale: [1.0, 1.0, 1.0]
     history_length: 5
