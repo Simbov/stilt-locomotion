@@ -1,9 +1,15 @@
 # Stilt Locomotion — Current Status
-**Last updated: 2026-08-14**
+**Last updated: 2026-08-31**
 
 ---
 
-## ✅ Run 8 complete — one policy walks with the stilts on AND off
+## ✅ Run 8 complete in sim — but ⚠️ NOT DEPLOYABLE
+
+> **Superseded for hardware by Run 9.** Everything below is true in sim and
+> still the reference for the two-morphology result. On the real robot
+> (2026-08-31) this checkpoint drifts at a zero command and will not track,
+> because its actor observation includes `base_lin_vel`, which the hardware
+> cannot measure. See the 2026-08-31 section below. Do not deploy it.
 
 `2026-08-13_20-35-42_run8-stilts-on-off`, 6000 iterations, 4096 envs, 2h36m.
 **The two-morphology goal is met.** A single policy, never told which
@@ -69,6 +75,71 @@ not stability.
   `deploy/README.md`, it is the easiest thing to get wrong.
 
 ---
+
+## 🤖 First hardware test, 2026-08-31 — Run 8 does not survive deployment
+
+Bare robot, QCR lab G1 (eth0 MAC `3c:6d:66:a3:e5:73` — **not** the May robot).
+Everything in the deployment path worked; the policy did not.
+
+**Passed on hardware:**
+
+- Runtime built against `~/unitree_sdk2` with **no sudo and no `/usr/local`
+  write** — the README's SDK-install step is unnecessary and would have
+  clobbered the lab's SDK. See `deploy/BRINGUP_CHECKLIST.md`.
+- `stilt_run8` loaded; `deploy.yaml` parsed; robot confirmed 29-DoF.
+- **495-dim observation layout verified against real encoders.** Held in the
+  FixStand pose the probe read left-leg knee `+0.19` against a predicted
+  `+0.20`, ankle `−0.26` against `−0.20`. Joint ordering and the
+  `default_joint_pos` subtraction are both correct.
+- Joystick path clean — command read exactly `vx +0.0000` at rest.
+
+**Failed: the robot walks forward at a genuinely zero command**, settling into a
+~12° forward torso pitch (`projected_gravity_x` −0.06 → −0.22 and holding).
+
+**Cause: the `base_lin_vel` zero-fill.** Obs `[0:15]` is body linear velocity;
+the G1 has no sensor for it (`unitree_hg` `LowState` is IMU + motor states
+only), so the runtime zero-fills. Run 8 learned to use that term to notice and
+correct its own drift. Told it is stationary, it never corrects.
+
+Reproduced in sim by zeroing the same slice (bare, 15 s):
+
+| commanded vx | real `base_lin_vel` | zeroed (= hardware) |
+|---|---|---|
+| 0.0 | x +0.04 m net — wanders out and returns | ~1 m of uncorrected drift |
+| 0.4 | `vx_true` +0.38, repeatable | erratic, +0.80 to +2.16 across runs |
+
+Every stubbed run fails to track and never corrects, with large episode-to-episode
+variance; every un-stubbed run is tight and repeatable. The hazard is
+unpredictability, not a guaranteed runaway.
+
+**Fix → Run 9: `base_lin_vel` is critic-only.** Actor obs 495 → 480. Cannot
+resume from Run 8 (input width changed). Pinned by
+`test_base_lin_vel_is_critic_only`. Logs: `logs/hardware/2026-08-31/`.
+
+**Bonus:** with the term gone from the deployed observation, the
+`State_RLBase.cpp` zero-fill patch is no longer needed at all.
+
+---
+
+## 🔧 Deploy config corrected (2026-08-30) — read before the next field trip
+
+Two startup-fatal bugs in `deploy/config/g1_stilt/deploy.yaml`, found by reading
+the `unitree_rl_mjlab` runtime source rather than by running it. Both are fixed
+in the generator and the regenerated config:
+
+- `commands:` was keyed `twist` (mjlab's command name). The C++ `velocity_commands`
+  term hardcodes `cfg["commands"]["base_velocity"]["ranges"]`.
+- No observation term carried a `params:` key. `ObservationManager` decides
+  single-group vs multi-group by probing `cfg.begin()->second["params"].IsDefined()`,
+  so the whole `observations:` block parsed as a map of groups and startup threw.
+
+Also confirmed from the same read: the stock runtime already produces the
+term-major, oldest-first 5-frame layout this policy needs — no C++ change for
+history, just `history_length: 5` per term and `use_gym_history` left unset.
+And the ONNX input tensor is named `obs`, which is what the single-group path
+calls it.
+
+Field runbook: `deploy/BRINGUP_CHECKLIST.md`.
 
 ## ⚠️ Runs 6 and 7 are void — the ankles are never welded (background)
 
@@ -259,7 +330,7 @@ the banner in that file. Regenerate it from the Run 8 ONNX metadata.
 
 **Runtime:** [unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) C++ binary (`g1_ctrl`) using ONNX Runtime 1.22.0 at 50 Hz. Launched via SSH — not app-based.
 
-**`base_lin_vel` handling:** zeroed (policy still responds to joystick velocity commands normally; `base_lin_vel` is measured feedback, not commanded speed).
+**`base_lin_vel` handling:** ~~zeroed~~ — **this was the Run 8 hardware failure.** Zero-filling it left the policy blind to its own drift; see the 2026-08-31 section. From Run 9 the term is critic-only and does not appear in the deployed observation at all.
 
 **To deploy a new checkpoint:** sync ONNX from HPC → copy to robot → run `./g1_ctrl`. No rebuild needed.
 
@@ -295,7 +366,8 @@ the banner in that file. Regenerate it from the Run 8 ONNX metadata.
 | `__init__.py` | Registers `Mjlab-Velocity-Flat-Stilt-G1` + viewer GUI (mass sliders, loads, torque monitor) |
 
 **Key environment settings vs stock G1:**
-- Actor observation history 5 frames (495 inputs) — the policy's only way to tell
+- Actor observation history 5 frames (**480** inputs from Run 9; 495 in Run 8,
+  which also fed the actor `base_lin_vel`) — the policy's only way to tell
   the two morphologies apart
 - `foot_height_scan` sensor rewired to stilt tip sites (drives foot_height obs + height rewards)
 - `foot_clearance` / `foot_slip` use stilt tip sites via `asset_cfg.site_names`

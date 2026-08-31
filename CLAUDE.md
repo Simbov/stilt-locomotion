@@ -238,9 +238,18 @@ Four more consequences worth holding onto:
   Spawning a fitted env in the stock ankle pose would fight a spring worth
   hundreds of Nm.
 - **The policy is not told which mode it is in.** It gets 5 frames of observation
-  history (`STILT_OBS_HISTORY`, actor obs 495 wide) and has to infer the
-  morphology from the dynamics. Nothing in the observation is unavailable on
-  hardware.
+  history (`STILT_OBS_HISTORY`, actor obs **480** wide from Run 9) and has to
+  infer the morphology from the dynamics. Nothing in the observation is
+  unavailable on hardware — and that is load-bearing, see below.
+
+- **`base_lin_vel` is critic-only (Run 9 onward).** The G1 has no body-velocity
+  sensor: `unitree_hg` `LowState` carries IMU and motor states and nothing else,
+  so the deploy runtime can only zero-fill the term. Run 8 had it in the actor,
+  learned to use it to notice and correct its own drift, and on the robot
+  (2026-08-31) was told it was stationary while it walked — it drifted at a zero
+  command and would not track. Actor obs went 495 → 480. Pinned by
+  `test_base_lin_vel_is_critic_only`; **anything added to the actor observation
+  must be measurable on the real robot.**
 - **Both contact sets must be collidable.** `CollisionCfg.disable_other_geoms`
   defaults to `True`, so any geom missing from `geom_names_expr` gets `contype`
   and `conaffinity` zeroed. Listing only the stilt capsules switched the robot's

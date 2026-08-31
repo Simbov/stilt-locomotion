@@ -8,3 +8,5 @@
 - [User preferences](user_preferences.md) — Working style and preferences observed this session
 - [Stilt mass DR investigation](stilt_mass_dr_investigation.md) — Mass write confirmed landing but torques unresponsive; recompute_constants fix; CUDA graph hypothesis; open question for next session
 - [Run 5 walking result](run5_walking_result.md) — Run 5 (2026-04-27_14-48-06) converged; robot walks, Phase 1 done, mass robust to 6kg/stilt; how to read tfevents metrics
+- [Hardware deploy without sudo](hardware_deploy_no_sudo.md) — build unitree_rl_mjlab against ~/unitree_sdk2; never install into /usr/local on a lab robot
+- [Hardware forward drift](hardware_forward_drift.md) — Run 8 walks forward at zero command; joystick and obs layout ruled out, base_lin_vel zero-fill suspected

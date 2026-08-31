@@ -127,10 +127,21 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # inference available without telling the policy anything the robot cannot
   # sense on hardware.
   #
-  # 5 frames x 99 = 495 inputs. Raise if the policy struggles to distinguish the
+  # 5 frames x 96 = 480 inputs. Raise if the policy struggles to distinguish the
   # two modes; lower if the deploy runtime cannot buffer this much.
   cfg.observations["actor"].history_length = STILT_OBS_HISTORY
   cfg.observations["actor"].flatten_history_dim = True
+
+  # base_lin_vel is PRIVILEGED — critic only. There is no body-velocity sensor
+  # on the G1: the unitree_hg LowState carries only IMU and motor states, so the
+  # deploy runtime has to zero-fill this term. Run 8 was trained with it as
+  # ground truth and used it to notice and correct its own drift; stubbed to
+  # zeros on hardware it was told it was stationary while it walked, never
+  # corrected, and behaved erratically — reproduced in sim by
+  # scripts/check_base_lin_vel_stub.py. Keeping it in the critic costs nothing
+  # (the critic is training-only) and the actor learns to infer its motion from
+  # the 5 frames of history it already has.
+  del cfg.observations["actor"].terms["base_lin_vel"]
 
   # ── Rewards ────────────────────────────────────────────────────────────────
   # foot_clearance and foot_slip use asset_cfg.site_names; foot_swing_height

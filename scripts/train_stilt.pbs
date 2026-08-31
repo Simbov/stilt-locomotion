@@ -1,11 +1,9 @@
 #!/bin/bash -l
 #PBS -N stilt-train
 #PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
-# Run 6 did 6000 iterations in 2h22m on the same hardware. Run 8 is a little
-# heavier per iteration — 29 DoF instead of 25, and the actor input is 5 frames
-# of history (495 wide, not 99) — but the physics dominates and the extra
-# network cost is a couple of percent, so expect 2h30m-3h. 4h leaves headroom
-# without asking the scheduler for a slot twice the size of the job.
+# Run 8 did 6000 iterations in 2h36m on this hardware. Run 9 is the same job
+# with three fewer actor inputs per frame, so expect the same 2h30m-3h. 4h
+# leaves headroom without asking the scheduler for a slot twice the size.
 #
 # Overrunning is not fatal: --agent.save-interval 500 means the worst case is
 # losing the last <500 iterations and the ONNX export, not the run.
@@ -25,20 +23,26 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
-# Run 8: from scratch (no --agent.resume; it defaults to False).
+# Run 9: from scratch (no --agent.resume; it defaults to False).
 #
-# Runs 6 and 7 are VOID. They trained a 25-DoF policy for a robot with its ankle
-# joints deleted, on the reading that the shank brace welds the ankle. The
-# hardware is always the stock 29-DoF G1; the stilts bolt on and come off. Run 8
-# is the first run against the real robot, so resuming was never an option.
+# THE ONE CHANGE FROM RUN 8: base_lin_vel is now critic-only. Run 8 walked on
+# hardware but drifted at a zero command and would not track — because obs[0:15]
+# is body linear velocity, the G1 has no sensor for it (unitree_hg LowState is
+# IMU + motor states only), and the deploy runtime can only zero-fill it. Run 8
+# had learned to lean on that term to notice and correct its own drift, so
+# stubbing it broke the policy. Confirmed on the robot 2026-08-31 and reproduced
+# in sim: scripts/check_base_lin_vel_stub.py.
 #
-# What Run 8 trains, all in envs/stilt_g1/, not here:
+# Resuming from Run 8 is NOT possible: the actor input changed 495 -> 480.
+#
+# What Run 9 trains, all in envs/stilt_g1/, not here:
 #   * ONE policy for BOTH morphologies — each episode draws stilts on or off at
 #     50/50 (events.py: reset_stilts_fitted)
 #   * ankles present and actuated; the brace is joint stiffness, 150-2000 Nm/rad,
 #     applied only in the fitted envs
 #   * 5 frames of actor observation history, so the policy can infer which
-#     morphology it is in. It is NOT told.
+#     morphology it is in. It is NOT told. 6 terms x 5 frames = 480 inputs;
+#     everything in them is measurable on the real robot.
 #   * per-morphology standing pose, spawn height and torso_too_low floor
 #
 # Carried over from Run 7, which fixed Run 6's frozen ~0.35 m/s gait:
@@ -48,11 +52,16 @@ uv sync --quiet
 # Watch Episode_Metrics/{vel_error,upright}_stilts_{on,off}: the aggregate cannot
 # tell "walks on stilts, falls over without them" from "mediocre at both".
 # Divide by stilts_fitted_fraction for the conditional mean. See metrics.py.
+#
+# Expect vel_error to be WORSE than Run 8's 0.250/0.194. Run 8 was being handed
+# its own velocity; this one has to infer it. A modest regression there is the
+# price of a policy that behaves the same on hardware as it does here — judge it
+# on check_base_lin_vel_stub.py agreement, not on beating Run 8's curves.
 export CUDA_VISIBLE_DEVICES=0
 uv run python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 6000 \
-    --agent.run-name run8-stilts-on-off \
+    --agent.run-name run9-no-baselinvel \
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
     --agent.upload-model False \
