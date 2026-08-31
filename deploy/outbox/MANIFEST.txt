@@ -1,0 +1,4 @@
+# Run 8 bare-robot bring-up bundle — generated 2026-08-30
+# Verify on the robot with:  md5sum -c MANIFEST.txt --ignore-missing
+2f881e1bfe107223cdc7a57ed2a60573  policy.onnx
+03f07877d380ae969d8ec44b972593eb  deploy.yaml
