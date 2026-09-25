@@ -10,3 +10,6 @@
 - [Run 5 walking result](run5_walking_result.md) — Run 5 (2026-04-27_14-48-06) converged; robot walks, Phase 1 done, mass robust to 6kg/stilt; how to read tfevents metrics
 - [Hardware deploy without sudo](hardware_deploy_no_sudo.md) — build unitree_rl_mjlab against ~/unitree_sdk2; never install into /usr/local on a lab robot
 - [Hardware forward drift](hardware_forward_drift.md) — Run 8 walks forward at zero command; joystick and obs layout ruled out, base_lin_vel zero-fill suspected
+- [Run 9 hardware result](run9_hardware_result.md) — 2026-09-14: Run 9 walks/turns stably on the G1, slight zero-command creep; sim creeps ~3 cm/s too; next visit ship --runtime for telemetry
+- [Stilts first hardware test](stilts_first_hardware_test.md) — 2026-09-17 new G1, stilts on: diverged; real ankle moves ±0.6 rad vs ~0 in sim brace
+- [Stilts second hardware test](stilts_second_hardware_test.md) — 2026-09-25: stilts-on 4 s run bounded (no divergence) but ankle still sags 0.1–0.2 rad, 30 cm left drift

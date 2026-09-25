@@ -56,7 +56,7 @@ cfg.events["stilts_fitted"].params["fitted_probability"] = 0.0  # bare, like the
 # History is term-major (each term's frames contiguous, oldest first), so the
 # term occupies the FIRST width*history entries when it is first in the group.
 _actor_terms = list(cfg.observations["actor"].terms.keys())
-if "base_lin_vel" not in _actor_terms:
+if "base_lin_vel" not in _actor_terms and STUB:
   print(
     "base_lin_vel is not in the actor observation for this config, so there is\n"
     "nothing for the hardware stub to zero and this check does not apply.\n"
@@ -67,12 +67,14 @@ if "base_lin_vel" not in _actor_terms:
     "term was removed."
   )
   raise SystemExit(0)
-if _actor_terms[0] != "base_lin_vel":
+if STUB and _actor_terms[0] != "base_lin_vel":
   raise SystemExit(
     f"base_lin_vel is not the first actor term (order: {_actor_terms}); the "
     "0:15 slice assumption no longer holds. Fix the slice before trusting this."
   )
-STUB_SLICE = slice(0, 3 * cfg.observations["actor"].history_length)
+STUB_SLICE = (
+  slice(0, 3 * cfg.observations["actor"].history_length) if STUB else slice(0, 0)
+)
 
 raw = ManagerBasedRlEnv(cfg=cfg, device="cpu")
 env = RslRlVecEnvWrapper(raw, clip_actions=None)

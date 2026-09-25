@@ -119,13 +119,26 @@ def _stilt_mass_play_gui(server: viser.ViserServer, env: EnvProtocol) -> None:
   fitted_readback = None
   if fitted_cfg is not None:
     with server.gui.add_folder("Stilts"):
+      # Show what the env is ACTUALLY configured for; do not impose a value.
+      # This used to hardcode "always on" and write fitted_probability = 1.0 at
+      # setup, which silently overrode the task config (and anything the
+      # caller had pinned) the moment the viewer opened — so the dropdown read
+      # "always on" while the running episode was still whatever the env was
+      # built with. Opening a viewer must not change the experiment.
+      _prob = float(fitted_cfg.params.get("fitted_probability", 0.5))
+      _initial = (
+        "always on"
+        if _prob >= 0.999
+        else "always off"
+        if _prob <= 0.001
+        else "randomised 50/50"
+      )
       fitted_mode = server.gui.add_dropdown(
         "fitted",
         ("always on", "always off", "randomised 50/50"),
-        initial_value="always on",
+        initial_value=_initial,
       )
       fitted_readback = server.gui.add_markdown("*—*")
-      fitted_cfg.params["fitted_probability"] = 1.0
 
       @fitted_mode.on_update
       def _(_) -> None:
@@ -284,6 +297,14 @@ def _stilt_mass_play_gui(server: viser.ViserServer, env: EnvProtocol) -> None:
 
       # What the sim is ACTUALLY running, not what the dropdown asks for — the
       # two differ until the next reset.
+      # Refresh the mass readback here too, not only when a slider moves —
+      # otherwise it sits on its placeholder for the whole session and looks
+      # broken, which is exactly how it looked.
+      try:
+        _refresh_readback()
+      except Exception:
+        pass
+
       if fitted_readback is not None:
         flag = getattr(raw_env, "stilt_fitted", None)
         state = "—" if flag is None else ("**ON**" if flag[0] > 0.5 else "**OFF**")
@@ -299,9 +320,20 @@ def _bar(value: float, limit: float, width: int = 14) -> str:
   return "█" * filled + "░" * (width - filled)
 
 
+def _stilts_are_off(raw_env) -> bool:
+  flag = getattr(raw_env, "stilt_fitted", None)
+  return flag is not None and float(flag[0]) < 0.5
+
+
 def _loads_text(raw_env) -> str:
   """Section loads for both stilts, ground-up."""
   lines: list[str] = []
+  if _stilts_are_off(raw_env):
+    # All zeros here is correct, not a broken panel: the stilt capsules are
+    # parked out of the world, so the contact sensor these loads are derived
+    # from has nothing to report.
+    lines.append("*stilts are OFF — no stilt contact, so every load is zero*")
+    lines.append("")
   for side in ("left", "right"):
     loads = section_loads_from_sensor(raw_env, side)
     lines.append(f"**{side}**")
@@ -318,6 +350,11 @@ def _loads_text(raw_env) -> str:
 def _pressure_text(raw_env) -> str:
   """Per-capsule ground reaction, heel (l1) to toe (r4)."""
   lines: list[str] = []
+  if _stilts_are_off(raw_env):
+    # Same reason as _loads_text: this reads the stilt capsules, and with the
+    # stilts off the robot is standing on its own 14 foot capsules instead.
+    lines.append("*stilts are OFF — the robot is on its own feet, not these*")
+    lines.append("")
   for side in ("left", "right"):
     forces = sensor_capsule_forces(raw_env, side)
     total = sum(forces.values())

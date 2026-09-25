@@ -1,574 +1,229 @@
-# G1 Hardware Deployment
+# G1 hardware deployment — reference
 
-Deploys a trained ONNX policy to the Unitree G1 (29-DOF) using
-[unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab)'s C++ runtime.
-The ONNX file is produced automatically by mjlab at the end of every training run.
+How the deployed policy actually runs, and why the pieces are arranged the way
+they are. For the step-by-step, use
+[`BRINGUP_CHECKLIST.md`](BRINGUP_CHECKLIST.md).
 
-This README documents what was actually done to get the g1_velocity policy running
-on the physical robot (first successful test: 2026-05-09).
+The runtime is [unitree_rl_mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab)'s
+C++ binary `g1_ctrl`, driving ONNX Runtime 1.22.0 at 50 Hz. mjlab exports the
+`.onnx` at the end of every training run.
+
+**Field history:** first successful walk 2026-05-09 (stock G1 policy). First
+stilt-policy session 2026-08-31 — the deployment path worked, the policy did
+not; see [`docs/RUN_RESULTS.md`](../docs/RUN_RESULTS.md).
 
 ---
 
-## Robot hardware facts (confirmed in field)
+## The robot
 
-| Item | Value |
+| | |
 |---|---|
-| OS | Ubuntu 20.04.6 LTS |
-| Kernel | Linux 5.10.104-tegra (Jetson Orin) |
-| Architecture | `aarch64` |
-| SSH address | `192.168.123.164` (Ethernet) |
-| SSH user | `unitree` / password `123` |
-| Ethernet interface | `eth0` |
-| Internet access | None (air-gapped) — all files must be transferred from laptop |
-| Pre-installed SDK | unitree_sdk2 v2.0.0 (too old — see patch notes below) |
-| Pre-installed deps | `libyaml-cpp-dev`, `libeigen3-dev`, `libboost-program-options-dev` all present |
+| OS / kernel | Ubuntu 20.04.6, Linux 5.10.104-tegra (Jetson Orin), `aarch64` |
+| SSH | `unitree@192.168.123.164`, password `123` (Unitree factory default) |
+| Interface | `eth0`; **no DHCP** — give your laptop a static `192.168.123.222/24` |
+| Internet | none — everything is transferred from the laptop |
+| Prereqs present | `libyaml-cpp-dev`, `libeigen3-dev`, `libboost-program-options-dev`, cmake 4.2.1, gcc 9.4 |
+| Body velocity sensor | **none.** See below — this shaped the policy design |
 
 ---
 
-## Prerequisites
+## Build: never install anything system-wide
 
-On your **laptop** (macOS or Linux, with internet):
-- `git`, `scp`
-- `uv run python` with `onnx` package (for verifying ONNX metadata)
+`scripts/prepare_runtime.py` patches a clean copy of the runtime **on the
+laptop** and `scripts/ship_to_robot.sh --runtime` sends it. Three patches, all
+required, none touching the robot's system directories:
 
-On the **robot's onboard computer** (already present on this G1):
-- All system deps already installed — no `apt install` needed
-- ONNX Runtime 1.22.0 — transfer from laptop (see Step 3)
-- unitree_sdk2 — needs updating from v2.0.0 (see Step 5)
+1. **KeyBase shim** — the robot's SDK has `Button<T>` and `Axis` with no common
+   base; unitree_rl_mjlab expects a newer SDK that has `KeyBase`.
+2. **Drop `fmt`** from `link_libraries` — listed, unused, not installed.
+3. **Point the build at `~/unitree_sdk2`** rather than `/usr/local`.
 
----
+### Why #3, and why the old instructions were wrong
 
-## One-time setup (first deployment only)
+The 2026-05 procedure said to `sudo make install` a newer `unitree_sdk2` into
+`/usr/local`. That fixes the symptom and creates a much worse problem: these are
+shared lab machines whose other software is built against what is already
+there.
 
-### Step 1 — SSH into the robot
+The symptom was dozens of `get_type_props` undefined references — the
+`/usr/local` SDK predates the G1's `unitree_hg` DDS types. It still does:
 
-```bash
-ssh unitree@192.168.123.164
-# password: 123
-```
-
-### Step 2 — Clone unitree_rl_mjlab onto the robot
-
-The robot has no internet. Clone on your laptop and transfer:
-
-```bash
-# On laptop:
-git clone https://github.com/unitreerobotics/unitree_rl_mjlab.git
-cd ..
-tar czf unitree_rl_mjlab.tar.gz unitree_rl_mjlab/
-scp unitree_rl_mjlab.tar.gz unitree@192.168.123.164:~/
-
-# On robot:
-tar xzf unitree_rl_mjlab.tar.gz
-```
-
-### Step 3 — Transfer ONNX Runtime 1.22.0
-
-```bash
-# On laptop:
-curl -LO https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-aarch64-1.22.0.tgz
-scp onnxruntime-linux-aarch64-1.22.0.tgz unitree@192.168.123.164:~/
-
-# On robot — the repo already has thirdparty/ set up, just unpack there:
-# (onnxruntime was already present in unitree_rl_mjlab/deploy/thirdparty/ on this robot)
-```
-
-### Step 4 — Update unitree_sdk2 (SDK v2.0.0 → latest)
-
-The pre-installed SDK v2.0.0 is missing `libunitree_hg_idl_cpp.a` — the compiled
-DDS type registrations for G1 (`unitree_hg` message types). Without it, linking fails
-with dozens of `get_type_props` undefined reference errors.
-
-```bash
-# On laptop:
-git clone https://github.com/unitreerobotics/unitree_sdk2.git
-cd ..
-tar czf unitree_sdk2.tar.gz unitree_sdk2/
-scp unitree_sdk2.tar.gz unitree@192.168.123.164:~/
-
-# On robot:
-mkdir unitree_sdk2_new
-tar xzf unitree_sdk2.tar.gz -C unitree_sdk2_new
-cd unitree_sdk2_new/unitree_sdk2
-mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
-sudo make install -j$(nproc)
-```
-
-### Step 5 — Apply three source patches to unitree_rl_mjlab
-
-All three patches are needed. Apply them once; they persist across rebuilds.
-
-#### 5a. Add `base_lin_vel` zero-fill (`State_RLBase.cpp`)
-
-The policy's obs[0:3] is body-frame linear velocity — ground-truth in sim, no
-direct sensor on hardware. Add a zero-fill registration in the `isaaclab` namespace
-block in `~/unitree_rl_mjlab/deploy/robots/g1/src/State_RLBase.cpp`:
-
-```cpp
-REGISTER_OBSERVATION(base_lin_vel)
-{
-    // No direct body-velocity sensor on hardware — zero-fill.
-    // Policy uses this as measured-speed feedback, not commanded speed.
-    return std::vector<float>{0.f, 0.f, 0.f};
-}
-```
-
-Use `cat >` to write since `nano` is not installed:
-```bash
-cat > ~/unitree_rl_mjlab/deploy/robots/g1/src/State_RLBase.cpp << 'EOF'
-#include "FSM/State_RLBase.h"
-#include "unitree_articulation.h"
-#include "isaaclab/envs/mdp/observations/observations.h"
-#include "isaaclab/envs/mdp/actions/joint_actions.h"
-#include <unordered_map>
-
-namespace isaaclab
-{
-
-REGISTER_OBSERVATION(keyboard_velocity_commands)
-{
-    std::string key = FSMState::keyboard->key();
-    static auto cfg = env->cfg["commands"]["base_velocity"]["ranges"];
-
-    static std::unordered_map<std::string, std::vector<float>> key_commands = {
-        {"w", {1.0f, 0.0f, 0.0f}},
-        {"s", {-1.0f, 0.0f, 0.0f}},
-        {"a", {0.0f, 1.0f, 0.0f}},
-        {"d", {0.0f, -1.0f, 0.0f}},
-        {"q", {0.0f, 0.0f, 1.0f}},
-        {"e", {0.0f, 0.0f, -1.0f}}
-    };
-    std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
-    if (key_commands.find(key) != key_commands.end())
-    {
-        cmd = key_commands[key];
-    }
-    return cmd;
-}
-
-REGISTER_OBSERVATION(base_lin_vel)
-{
-    // No direct body-velocity sensor on hardware — zero-fill.
-    // Policy uses this as measured-speed feedback, not commanded speed.
-    return std::vector<float>{0.f, 0.f, 0.f};
-}
-
-}
-
-State_RLBase::State_RLBase(int state_mode, std::string state_string)
-: FSMState(state_mode, state_string) 
-{
-    auto cfg = param::config["FSM"][state_string];
-    auto policy_dir = param::parser_policy_dir(cfg["policy_dir"].as<std::string>());
-
-    env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
-        YAML::LoadFile(policy_dir / "params" / "deploy.yaml"),
-        std::make_shared<unitree::BaseArticulation<LowState_t::SharedPtr>>(FSMState::lowstate)
-    );
-    env->alg = std::make_unique<isaaclab::OrtRunner>(policy_dir / "exported" / "policy.onnx");
-
-    this->registered_checks.emplace_back(
-        std::make_pair(
-            [&]()->bool{ return isaaclab::mdp::bad_orientation(env.get(), 1.0); },
-            FSMStringMap.right.at("Passive")
-        )
-    );
-}
-
-void State_RLBase::run()
-{
-    auto action = env->action_manager->processed_actions();
-    for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
-        lowcmd->msg_.motor_cmd()[env->robot->data.joint_ids_map[i]].q() = action[i];
-    }
-}
-EOF
-```
-
-#### 5b. Add `KeyBase` shim (`unitree_joystick_dsl.hpp`)
-
-SDK v2.0.0's `UnitreeJoystick` has `Button<T>` and `Axis` as separate classes with
-no common base. `unitree_rl_mjlab` was written against a newer SDK that has a `KeyBase`
-base class. Apply the shim with Python:
-
-```bash
-python3 << 'EOF'
-import re
-
-path = '/home/unitree/unitree_rl_mjlab/deploy/include/unitree_joystick_dsl.hpp'
-with open(path, 'r') as f:
-    content = f.read()
-
-shim = """// KeyBase: compat shim — Button<T> and Axis have no common base in this SDK version
-struct KeyBase {
-    bool pressed = false;
-    bool on_pressed = false;
-    bool on_released = false;
-    float pressed_time = 0.0f;  // stub; hold-time transitions not used in this config
-};
-template<typename T>
-inline KeyBase make_key_base(const ::unitree::common::Button<T>& b) {
-    return {b.pressed, b.on_pressed, b.on_released, 0.0f};
-}
-inline KeyBase make_key_base(const ::unitree::common::Axis& a) {
-    return {a.pressed, a.on_pressed, a.on_released, 0.0f};
-}
-
-"""
-
-content = content.replace(
-    '// Retrieve KeyBase from UnitreeJoystick (case-insensitive)\n',
-    shim + '// Retrieve KeyBase from UnitreeJoystick (case-insensitive)\n')
-content = content.replace('inline const KeyBase& GetKey(', 'inline KeyBase GetKey(')
-content = content.replace(
-    'const KeyBase* (*)(const UnitreeJoystick&)',
-    'KeyBase (*)(const UnitreeJoystick&)')
-content = re.sub(
-    r'->const KeyBase\*\{ return &static_cast<const KeyBase&>\(j\.(\w+)\); \}',
-    r'->KeyBase{ return make_key_base(j.\1); }',
-    content)
-content = content.replace('return *it->second(joy);', 'return it->second(joy);')
-content = content.replace(
-    'const KeyBase& kb = GetKey(joy, a.name);',
-    'const KeyBase kb = GetKey(joy, a.name);')
-
-with open(path, 'w') as f:
-    f.write(content)
-
-print("Patched successfully")
-EOF
-```
-
-#### 5c. Remove unused `fmt` dependency (`CMakeLists.txt`)
-
-`libfmt` is listed in `link_libraries` but not used anywhere in the source.
-It's not installed on the robot. Remove it:
-
-```bash
-python3 -c "
-path = '/home/unitree/unitree_rl_mjlab/deploy/robots/g1/CMakeLists.txt'
-with open(path) as f: content = f.read()
-content = content.replace('  fmt\n', '')
-with open(path, 'w') as f: f.write(content)
-print('done')
-"
-```
-
----
-
-## Per-policy setup
-
-For each new policy you want to deploy, do the following.
-
-### Step 6 — Verify ONNX metadata (on laptop)
-
-```bash
-uv run python -c "
-import onnx
-m = onnx.load('logs/rsl_rl/g1_velocity/<run>/<run>.onnx')
-for p in m.metadata_props: print(p.key, ':', p.value)
-"
-```
-
-Check `observation_names` — the order defines the obs vector. Must match `deploy.yaml`.
-
-### Step 7 — Create policy directory on robot
-
-```bash
-# On robot:
-mkdir -p ~/unitree_rl_mjlab/deploy/robots/g1/config/policy/velocity/<name>/params
-mkdir -p ~/unitree_rl_mjlab/deploy/robots/g1/config/policy/velocity/<name>/exported
-```
-
-### Step 8 — Transfer ONNX and deploy.yaml
-
-```bash
-# On laptop — transfer ONNX:
-RUN=<run_timestamp>
-scp logs/rsl_rl/g1_velocity/$RUN/$RUN.onnx \
-    unitree@192.168.123.164:~/unitree_rl_mjlab/deploy/robots/g1/config/policy/velocity/<name>/exported/policy.onnx
-
-# Transfer deploy.yaml:
-scp deploy/config/g1_velocity/deploy.yaml \
-    unitree@192.168.123.164:~/unitree_rl_mjlab/deploy/robots/g1/config/policy/velocity/<name>/params/deploy.yaml
-```
-
-### Step 9 — Update config.yaml to point at your policy
-
-```bash
-# On robot — edit the Velocity policy_dir:
-python3 -c "
-path = '/home/unitree/unitree_rl_mjlab/deploy/robots/g1/config/config.yaml'
-with open(path) as f: content = f.read()
-content = content.replace(
-    'policy_dir: config/policy/velocity/simon',
-    'policy_dir: config/policy/velocity/<name>')
-with open(path, 'w') as f: f.write(content)
-print('done')
-"
-```
-
-### Step 10 — Build
-
-```bash
-cd ~/unitree_rl_mjlab/deploy/robots/g1/build
-cmake ..
-make -j$(nproc)
-```
-
-Clock skew warnings (`modification time ... in the future`) are harmless — the robot's
-clock is set to epoch (1970). The binary is still valid.
-
----
-
-## Running on the robot
-
-### Safety checklist (every time)
-- [ ] Robot suspended on gantry / harness
-- [ ] Correct feet fitted for policy (bare feet for g1_velocity, stilts for stilt policy)
-- [ ] Flat, clear floor beneath robot
-- [ ] Joystick charged and paired
-- [ ] E-stop within reach — zero all sticks to stop motion
-- [ ] Second person dedicated to E-stop at all times
-
-### Start sequence
-
-```bash
-cd ~/unitree_rl_mjlab/deploy/robots/g1/build
-./g1_ctrl -n eth0
-```
-
-The terminal will print the policy directory it loaded — verify it says your policy name.
-
-**Joystick transitions** (confirmed on physical robot):
-
-| Button combo | Transition |
-|---|---|
-| **L2 + D-pad Up** | Passive → FixStand (stands up over ~2 sec) |
-| **R2 + A** | FixStand → Velocity (your policy activates) |
-| **L2 + B** | Any → Passive (joints go to damping — robot drops if not on gantry) |
-
-After activating Velocity, keep sticks centred for a few seconds and observe
-standing stability before commanding motion. Left stick = forward/back/lateral,
-right stick = yaw.
-
----
-
-## deploy.yaml format notes
-
-The runtime registers obs terms by name. Names in the YAML must match what the
-C++ `REGISTER_OBSERVATION` macros in `observations.h` define. The registered
-names (confirmed from source inspection) are:
-
-| YAML key | What it computes |
-|---|---|
-| `base_lin_vel` | zero-fill (added via patch) |
-| `base_ang_vel` | IMU gyroscope |
-| `projected_gravity` | gravity vector from IMU quaternion |
-| `joint_pos_rel` | encoder position − `default_joint_pos` |
-| `joint_vel_rel` | encoder velocity |
-| `last_action` | previous policy output (raw, before scale/offset) |
-| `velocity_commands` | joystick vx/vy/yaw, reads from `commands.base_velocity` |
-
-**Important:** the obs order in `deploy.yaml` defines the obs vector order. It must
-match training exactly. The policy was trained with:
-`base_lin_vel, base_ang_vel, projected_gravity, joint_pos, joint_vel, actions, command`
-which maps to the runtime names above.
-
-The command section must use `base_velocity` as the key (not `twist`) because
-`velocity_commands` hardcodes `commands.base_velocity.ranges` in the C++ source.
-
-Every term must also carry an explicit `params:` key, even an empty one.
-`ObservationManager::_prapare_terms` decides whether the `observations:` block
-is a single group or a map of groups by testing
-`cfg.begin()->second["params"].IsDefined()`. Without it the block is read as
-groups, each term name becomes a *group* name, and startup throws on the first
-key inside it (`Observation term 'scale' is not registered.`). The stock Unitree
-configs all carry `params: {}` and `clip: null` on every term; ours now do too.
-
-All scales are 1.0 — obs normalisation is baked into the ONNX.
-
-### The 5-frame history needs no runtime change
-
-The stock runtime already produces exactly the layout this policy wants. Set
-`history_length: 5` on every term and leave `use_gym_history` **unset**:
-
-- `ObservationTermCfg::get()` concatenates that term's whole ring buffer,
-  oldest entry first (`std::deque`, oldest at the front).
-- `compute_group` walks the terms in YAML order and appends each one's block.
-
-That is term-major — every term's five frames contiguous — which is what mjlab
-flattens on the training side (`CircularBuffer.buffer` is documented
-oldest→newest). Setting `use_gym_history: true` switches the runtime to the
-frame-major layout instead, and the result loads, runs, and walks badly with no
-error. Pinned by `tests/test_deploy_config.py`.
-
-### The ONNX input tensor must be named `obs`
-
-`OrtRunner::act` looks the observation group up by the ONNX graph's input name
-and throws `Input name X not found in observations` otherwise. The single-group
-path names the group `obs`, and mjlab exports the input as `obs`. If a future
-export renames it, rename the group, not the model.
-
----
-
-## Config values reference
-
-All numerical values in `deploy.yaml` come from ONNX metadata embedded at training.
-To regenerate from any checkpoint:
-
-```python
-import onnx
-m = onnx.load("path/to/policy.onnx")
-for p in m.metadata_props:
-    print(p.key, ":", p.value)
-```
-
-| YAML field | ONNX metadata key | Notes |
+| | `unitree_hg` symbols | `include/unitree/idl` |
 |---|---|---|
-| `stiffness` | `joint_stiffness` | PD kp per joint |
-| `damping` | `joint_damping` | PD kd per joint |
-| `default_joint_pos` | `default_joint_pos` | Standing pose + action offset |
-| `actions.scale` | `action_scale` | Per-joint action multiplier |
-| `actions.offset` | `default_joint_pos` | Same as standing pose |
+| `/usr/local/lib/libunitree_sdk2.a` | **0** | `go2`, `ros2` |
+| `~/unitree_sdk2/lib/aarch64/libunitree_sdk2.a` | **95** | `go2`, `hg`, `hg_doubleimu`, `ros2` |
+
+The home-directory SDK already has everything, including a matching bundled
+cyclonedds under `thirdparty/`. So the patch adds `include_directories(BEFORE)`,
+`link_directories(BEFORE)` and an RPATH pointing there. No sudo, nothing
+installed, no lab software touched. Verify after building:
+
+```sh
+readelf -d g1_ctrl | grep RUNPATH     # -> ~/unitree_sdk2/thirdparty/lib/aarch64
+ldd g1_ctrl | grep -E "ddsc|onnx"     # -> must NOT be /usr/local
+```
+
+CMake 4.2.1 configures this fine. The `cmake_minimum_required(VERSION 3.0)` in
+`thirdparty/cnpy` is inert — cnpy is globbed as sources, never
+`add_subdirectory`'d.
 
 ---
 
-## Troubleshooting
+## The lowcmd channel
 
-| Error | Cause | Fix |
-|---|---|---|
-| `get_type_props` undefined reference | SDK v2.0.0 missing `libunitree_hg_idl_cpp.a` | Update unitree_sdk2 (Step 4) |
-| `KeyBase` does not name a type | SDK `Button`/`Axis` lack common base | Apply `KeyBase` shim (Step 5b) |
-| `cannot find -lfmt` | `libfmt` not installed, not needed | Remove from CMakeLists.txt (Step 5c) |
-| `unrecognised option '--config'` | Wrong flag — there is no `--config` flag | Use `./g1_ctrl -n eth0` |
-| `--help` causes abort | Known quirk — the help flag works but then aborts | Ignore the abort, read the output |
-| Clock skew warnings in make | Robot clock set to 1970 | Harmless — binary is valid |
-| Policy not loading | Wrong `policy_dir` in `config.yaml` | Check with `grep policy_dir config.yaml` |
+The robot's built-in `master_service` publishes motor commands continuously.
+`g1_ctrl` detects that at startup:
+
+```
+[critical] The other process is using the lowcmd channel, please close it first.
+```
+
+…and then **continues anyway** — upstream commented out the `exit(0)`. Two
+controllers then write to the motors at once. Put the robot into damping/debug
+mode from the remote first; the absence of that log line is the go/no-go test.
+Don't kill `master_service` (needs sudo, not a systemd unit, may need a reboot
+to restore).
 
 ---
 
-## Ankle handling (stilt hardware)
+## `deploy.yaml`
 
-**Rewritten 2026-08-13. The previous version of this section said the four ankle
-motors must be put in damping mode, and that the action vector is 25. Both are
-wrong — do not follow any copy of that instruction.**
+**Generated, never hand-edited.** The gains, action scales and standing pose all
+come out of the trained policy's ONNX metadata:
 
-The robot is the stock 29-DOF G1 in every configuration. **All four ankle motors
-stay in normal PD position mode and are driven by the policy, stilts on or off.**
-The action vector is **29**.
-
-The brace does stiffen the ankle when the stilts are bolted on, but it does so
-mechanically, and the policy is trained against exactly that: ankle joint
-stiffness randomised 150–2000 Nm/rad in the fitted half of the training envs, and
-zero in the other half. It has learned to command the ankle into a clamp that may
-or may not be there. Putting the motors in damping mode would take away authority
-the policy is counting on.
-
-Watch ankle motor temperature on the first stilted runs anyway. The clamp
-stiffness is unmeasured — the 150–2000 Nm/rad range is an engineering guess — so
-if the real brace is stiffer than the top of that range the motors will do more
-static work than training predicted. If they run hot, measure the actual clamp
-stiffness and retrain with the range corrected; do not paper over it by changing
-the control mode.
-
-### One policy, two morphologies
-
-Run 8 onwards trains a single policy that walks with the stilts fitted and with
-them removed. It is **not** told which — it infers the morphology from 5 frames of
-observation history. Two things follow for deployment:
-
-- The runtime must buffer 5 frames of observation and feed the policy a 495-dim
-  vector. A single-frame runtime will not work with this policy.
-
-  **The layout is per-term, not per-frame.** This is the easy thing to get
-  wrong: the vector is *not* five 99-dim frames concatenated. Each observation
-  term contributes all five of its frames contiguously, oldest first, in term
-  order:
-
-  | offset | term | layout |
-  |---|---|---|
-  | 0:15 | `base_lin_vel` | 5 frames × 3 |
-  | 15:30 | `base_ang_vel` | 5 × 3 |
-  | 30:45 | `projected_gravity` | 5 × 3 |
-  | 45:190 | `joint_pos` | 5 × 29 |
-  | 190:335 | `joint_vel` | 5 × 29 |
-  | 335:480 | `actions` | 5 × 29 |
-  | 480:495 | `command` | 5 × 3 |
-
-  Within each block, index 0 is the OLDEST frame and index 4 the newest. Getting
-  this wrong produces a policy that runs without error and walks badly, so
-  verify it against a recorded sim rollout before putting weight on it.
-- No configuration switch is needed when the stilts come on or off, and there is
-  no "stilt mode" flag to set. Fit them or don't; the policy adapts within a few
-  control steps. Expect the first few steps after a change to be the shakiest.
-
-### The config is generated, not written
-
-`deploy/config/g1_stilt/deploy.yaml` is now current, generated from the Run 8
-ONNX (`2026-08-13_20-35-42_run8-stilts-on-off`). **Do not hand-edit it** — the
-PD gains, action scales and standing pose all come out of the trained policy and
-cannot be derived by hand. After any retrain:
-
-```bash
+```sh
 uv run python scripts/generate_deploy_config.py --run logs/rsl_rl/stilt_g1_velocity/<run>
 ```
 
-That also writes `reference_io.json`: recorded (observation, action) pairs taken
-straight from the sim.
+That also writes `reference_io.json` — recorded (observation, action) pairs from
+the sim, which `scripts/verify_deploy_io.py` replays through the shipped `.onnx`.
 
-### Verify before the robot takes weight
+### Four rules the C++ parser enforces, none of them obvious
 
-The observation layout above is the most likely thing to get wrong, and getting
-it wrong gives you a policy that loads, runs, and merely walks badly — there is
-no error to catch. Run this on the machine that will serve the policy, against
-the exact `.onnx` that shipped there:
+Each of these was a startup-fatal bug at some point. All are handled by the
+generator and pinned by `tests/test_deploy_config.py`.
 
-```bash
-uv run python scripts/verify_deploy_io.py --onnx <policy>.onnx
-```
+1. **`commands:` must be keyed `base_velocity`.** The `velocity_commands` term
+   hardcodes `cfg["commands"]["base_velocity"]["ranges"]` — mjlab's own command
+   name (`twist`) leaves the lookup undefined and it throws at the first step.
+2. **Every observation term needs a `params:` key, even `{}`.**
+   `ObservationManager::_prapare_terms` decides single-group vs multi-group by
+   probing `cfg.begin()->second["params"].IsDefined()`. Without it the whole
+   block parses as a map of *groups*, each term name becomes a group name, and
+   startup throws `Observation term 'scale' is not registered.`
+3. **The ONNX input tensor must be named `obs`.** `OrtRunner::act` looks the
+   group up by the graph's input name. The single-group path names it `obs`;
+   mjlab exports `obs`. If a future export renames it, rename the group.
+4. **Leave `use_gym_history` unset.** See the layout section below.
 
-It should report `PASS`, worst error under 1e-4. Locally the Run 8 model
-reproduces to 6.4e-6.
+### Observation term names
 
-This checks the model and the layout. It **cannot** tell you the runtime is
-filling those slots with the right sensor values. For that, hold the robot in
-the standing pose, log one real observation, and compare it term by term against
-a reference pair — `projected_gravity` should be near `(0, 0, -1)`, `joint_pos`
-near zero (it is relative to `default_joint_pos`), and `base_ang_vel` near zero.
+The YAML keys must match the runtime's `REGISTER_OBSERVATION` macros, which are
+*not* the same as mjlab's names. The generator maps them:
 
-### FixStand hands over into a different pose
+| mjlab name | runtime key | computed from |
+|---|---|---|
+| `base_ang_vel` | `base_ang_vel` | IMU gyroscope |
+| `projected_gravity` | `projected_gravity` | IMU quaternion |
+| `joint_pos` | `joint_pos_rel` | encoder position − `default_joint_pos` |
+| `joint_vel` | `joint_vel_rel` | encoder velocity |
+| `actions` | `last_action` | previous raw policy output |
+| `command` | `velocity_commands` | joystick, clamped to `commands.base_velocity.ranges` |
 
-`R2 + A` switches from FixStand to the policy in one control step, and the two
-poses are not the same. FixStand's target (in `config/config.yaml`) is the stock
-G1 crouch — knee 0.3, ankle_pitch −0.2, shoulder_pitch 0.35, elbow 0.87 — while
-this policy's `default_joint_pos` is the shared stilt pose, knee 0.1, ankle 0,
-shoulder_pitch 0.2, elbow 0.6. The gains step at the same instant, from
-FixStand's kp 100/150 to the policy's 40.2/99.1.
+All scales are 1.0 — normalisation is baked into the ONNX.
 
-So expect a visible settle on the handover: the legs straighten by ~0.2 rad at
-the knee and the arms come down. Do it on the hoist the first time. If it is
-sharper than you like, copy `default_joint_pos` from `deploy.yaml` into the
-FixStand `qs` block on the robot so the two poses agree — that is a robot-side
-config edit, not a policy change, and it makes the transition a no-op.
+### History layout — term-major, oldest first
 
-### First bring-up, in order
+The 480-input vector is **not** five stacked frames. Each term contributes all
+five of its frames contiguously:
 
-The policy handles both morphologies, so start with the easier one:
+| offset | term | layout |
+|---|---|---|
+| 0:15 | `base_ang_vel` | 5 × 3 |
+| 15:30 | `projected_gravity` | 5 × 3 |
+| 30:175 | `joint_pos_rel` | 5 × 29 |
+| 175:320 | `joint_vel_rel` | 5 × 29 |
+| 320:465 | `last_action` | 5 × 29 |
+| 465:480 | `velocity_commands` | 5 × 3 |
 
-1. **Bare robot, suspended.** No stilts, robot on the gantry or hoist, feet off
-   the ground. Confirm it holds the standing pose and the joints are not
-   buzzing or fighting.
-2. **Bare robot, on the ground, zero command.** It should stand. Pelvis ~0.79 m.
-3. **Bare robot, walking.** Work up through the command range. It tracks
-   forward well to about 0.4 m/s and saturates near 0.56; yaw undershoots by
-   roughly half and varies between attempts, so judge it over several.
-4. **Only then fit the stilts.** Pelvis goes to ~1.20 m. No config change, no
-   flag — the policy re-infers the morphology within a few control steps, and
-   those first steps are the shakiest part of the whole sequence.
+Index 0 within each block is the **oldest** frame.
 
-Keep the hoist attached through step 4. In sim the stilted robot never fell in
-40 episodes, but the brace stiffness is the least-grounded number in the model —
-the real clamp has never been measured, and the training range (150–2000 Nm/rad)
-is an engineering guess.
+**The stock runtime already produces exactly this** — no C++ change is needed
+for history. `ObservationTermCfg::get()` concatenates the term's whole deque
+(oldest at the front) and `compute_group` walks terms in YAML order. Just set
+`history_length: 5` per term and leave `use_gym_history` unset; setting it true
+switches to a frame-major layout, and the result loads, runs, and walks badly
+with no error at all.
+
+---
+
+## `base_lin_vel`: why it is gone
+
+**The G1 has no body-velocity sensor.** `unitree_hg` `LowState_` carries
+`imu_state_` (quaternion, gyro, accelerometer) and motor states. Nothing else.
+
+Runs up to and including Run 8 had `base_lin_vel` in the actor observation, and
+the deploy runtime zero-filled it with a patch to `State_RLBase.cpp`. That
+looked harmless and was not: the policy had learned to use that term to notice
+and correct its own drift, so on hardware — permanently told it was stationary —
+it walked forward at a zero command and would not track. Reproduced in sim by
+zeroing the same slice.
+
+**From Run 9 the term is critic-only.** It does not appear in the deployed
+observation, there is nothing to zero-fill, and the `State_RLBase.cpp` patch is
+no longer needed. The policy infers its motion from the 5 frames of history it
+already gets.
+
+The general rule, now pinned by `tests/test_env_wiring.py`:
+
+> **Anything in the actor observation must be measurable on the real robot.**
+> The critic may use whatever privileged state it likes — it is training-only.
+
+---
+
+## Ankles, and the two morphologies
+
+**The robot is always the stock 29-DoF G1, and all four ankle motors stay in
+normal PD position mode**, stilts on or off. The action vector is 29. The brace
+stiffens the ankle mechanically, and the policy is trained against exactly that
+(ankle stiffness randomised 10–500 Nm/rad in the fitted half of training from Run 10; 150–2000 up to Run 9).
+Putting the motors in damping would remove authority the policy is counting on.
+
+One policy handles both morphologies and **is not told which** — it infers from
+observation history. **No configuration changes between them.** Fit the stilts
+or don't; expect the first few steps after a change to be the shakiest.
+
+Watch ankle motor temperature on early stilted runs. The clamp stiffness has
+never been measured and the training range is an engineering guess; if the
+motors run hot, measure it and retrain with the range corrected rather than
+changing the control mode.
+
+---
+
+## Joystick
+
+| Combo | Transition |
+|---|---|
+| `L2 + D-pad Up` | Passive → FixStand |
+| `R2 + A` | FixStand → Velocity (policy runs) |
+| `L2 + B` | any → Passive (**damping — the robot drops if unsupported**) |
+| `D-pad Down` | any → Passive (same as `L2 + B`, one thumb; added by `prepare_runtime.py`) |
+
+Left stick forward = `+vx`, left stick left = `+vy`, right stick left = `+yaw`.
+Commands are clamped to the trained range, so full deflection is not an
+overspeed risk.
+
+`g1_ctrl -n eth0`. There is no `--config` flag; `--help` prints and then aborts.
+
+---
+
+## Files
+
+| Path | Purpose |
+|---|---|
+| `scripts/prepare_runtime.py` | patch a clean runtime checkout, on the laptop |
+| `scripts/ship_to_robot.sh` | checksum + transfer, one command |
+| `scripts/generate_deploy_config.py` | `deploy.yaml` + `reference_io.json` from a run |
+| `scripts/verify_deploy_io.py` | replay golden vectors through the shipped ONNX |
+| `deploy/outbox/*.sh` | robot-side identify / install / pose-match |
+| `deploy/config/g1_stilt/` | the generated config and golden vectors |

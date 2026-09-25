@@ -27,6 +27,12 @@ if _prob is not None:
         _events["stilts_fitted"].params["fitted_probability"] = float(_prob)
   print(f"[play_stilt] fitted_probability pinned to {_prob}")
 
+# NOTE: do not pin the command ranges to a fixed value here. The viser command
+# GUI seeds a "Max <axis>" slider from ranges.<axis>[1] and that slider has
+# min=0.1, so a zero range trips `assert max >= value >= min` in viser and the
+# viewer dies on startup. To hold a fixed command, use the GUI instead: the
+# Twist folder has an Enable checkbox whose sliders default to 0.0 and hold.
+
 from mjlab.viewer.viser.viewer import ViserPlayViewer  # noqa: E402
 
 

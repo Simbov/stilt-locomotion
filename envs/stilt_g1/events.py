@@ -145,6 +145,14 @@ def reset_stilts_fitted(
     sim.model.geom_pos[env_ids, gid] = sim.get_default_field("geom_pos")[gid] + (
       removed * park
     )
+    #    Parking alone only *moves* the visual meshes — 6 m up is still inside
+    #    the rendered scene, so a stilts-off robot appeared to have a pair of
+    #    stilts hovering above its head. Fade them out as well, so "off" looks
+    #    off. Alpha only affects rendering; the parking above is what keeps the
+    #    contact capsules from touching anything.
+    sim.model.geom_rgba[env_ids, gid, 3] = (
+      sim.get_default_field("geom_rgba")[gid, 3] * fitted
+    )
 
   # 3. Slide the tip sites up to the robot's own sole when the stilts are off.
   #    foot_height_scan, foot_clearance and foot_slip all read these sites; left

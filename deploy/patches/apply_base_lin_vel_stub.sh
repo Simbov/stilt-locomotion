@@ -1,3 +1,6 @@
+# OBSOLETE from Run 9 (2026-08-31). base_lin_vel is critic-only, so it no
+# longer appears in the deployed observation and needs no zero-fill stub.
+# Kept only for deploying a pre-Run-9 checkpoint, which you should not do.
 #!/usr/bin/env bash
 # Rewrites State_RLBase.cpp to add the base_lin_vel zero-fill registration.
 #

@@ -214,7 +214,7 @@ policy has to handle both. Five things move together per draw, all in
 | stilt contact capsules | live | parked +6 m |
 | ground contact | 16 stilt capsules | the robot's 14 foot capsules |
 | `*_stilt_tip` sites | at the stilt plate, −0.4425 | slid up to the sole, −0.035 |
-| ankle joint stiffness | 10–500 Nm/rad (the brace; 150–2000 up to Run 9) | 0 |
+| ankle joint stiffness | 150–2000 Nm/rad (the brace) | 0 |
 | pelvis spawn height | 1.1977 m | 0.7902 m |
 | standing pose | **the same for both** — see below | |
 
@@ -354,7 +354,7 @@ regenerated from the Run 8 ONNX metadata before any hardware deployment.
 
 ## Code style
 
-Follow `mjlab/CLAUDE.md` for commit, PR, and style conventions. The short
+Follow `mjlab/AGENTS.md` for commit, PR, and style conventions. The short
 version: `make check` in `mjlab/` must pass before any commit touching mjlab
 source; run `uv run ruff format && uv run ruff check --fix` for project-level
 Python files.

@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #PBS -N stilt-train
 #PBS -l select=1:ncpus=8:ngpus=1:mem=32GB:gpu_id=H100
-# Run 8 did 6000 iterations in 2h36m on this hardware. Run 9 is the same job
-# with three fewer actor inputs per frame, so expect the same 2h30m-3h. 4h
-# leaves headroom without asking the scheduler for a slot twice the size.
+# Run 8 did 6000 iterations in 2h36m on this hardware; Runs 9 and 10 are the
+# same size, so expect 2h30m-3h. 4h leaves headroom without asking the
+# scheduler for a slot twice the size.
 #
 # Overrunning is not fatal: --agent.save-interval 500 means the worst case is
 # losing the last <500 iterations and the ONNX export, not the run.
@@ -23,45 +23,35 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync --quiet
 
 # ── Training ───────────────────────────────────────────────────────────────
-# Run 9: from scratch (no --agent.resume; it defaults to False).
+# Run 10: from scratch (no --agent.resume; it defaults to False).
 #
-# THE ONE CHANGE FROM RUN 8: base_lin_vel is now critic-only. Run 8 walked on
-# hardware but drifted at a zero command and would not track — because obs[0:15]
-# is body linear velocity, the G1 has no sensor for it (unitree_hg LowState is
-# IMU + motor states only), and the deploy runtime can only zero-fill it. Run 8
-# had learned to lean on that term to notice and correct its own drift, so
-# stubbing it broke the policy. Confirmed on the robot 2026-08-31 and reproduced
-# in sim: scripts/check_base_lin_vel_stub.py.
+# THE ONE CHANGE FROM RUN 9: brace_stiffness_range 150-2000 -> 10-500 Nm/rad
+# (env_cfgs.py, stilts_fitted). Run 9 walks on hardware with bare feet, but with
+# stilts fitted the real brace adds only ~0-35 Nm/rad on top of the motor's own
+# 28.5 Nm/rad PD. Trained against a near-rigid brace, Run 9 drives ankle pitch to
+# -1.1..-1.9 rad targets at the 50 Nm limit and relies on the brace to stop it;
+# on the robot the ankle sagged to -0.1..-0.25 rad (shin forward) and it drifted
+# 30 cm sideways in 3.6 s (2026-09-25), or diverged outright (2026-09-17).
+# See logs/hardware/2026-09-25/ankle_compare.png.
 #
-# Resuming from Run 8 is NOT possible: the actor input changed 495 -> 480.
+# Resuming from Run 9 is possible (same 480-wide actor) but NOT done: its ankle
+# habit is exactly what this run has to unlearn.
 #
-# What Run 9 trains, all in envs/stilt_g1/, not here:
-#   * ONE policy for BOTH morphologies — each episode draws stilts on or off at
-#     50/50 (events.py: reset_stilts_fitted)
-#   * ankles present and actuated; the brace is joint stiffness, 150-2000 Nm/rad,
-#     applied only in the fitted envs
-#   * 5 frames of actor observation history, so the policy can infer which
-#     morphology it is in. It is NOT told. 6 terms x 5 frames = 480 inputs;
-#     everything in them is measurable on the real robot.
-#   * per-morphology standing pose, spawn height and torso_too_low floor
+# Everything else is Run 9 unchanged: one policy for both morphologies (50/50),
+# ankles actuated, 5-frame history, base_lin_vel critic-only, air_time 0.5,
+# command curriculum capped at 0.8 m/s.
 #
-# Carried over from Run 7, which fixed Run 6's frozen ~0.35 m/s gait:
-#   * air_time reward 0.5, command_threshold 0.3
-#   * command curriculum capped at 0.8 m/s forward instead of ramping to 2.0
-#
-# Watch Episode_Metrics/{vel_error,upright}_stilts_{on,off}: the aggregate cannot
-# tell "walks on stilts, falls over without them" from "mediocre at both".
-# Divide by stilts_fitted_fraction for the conditional mean. See metrics.py.
-#
-# Expect vel_error to be WORSE than Run 8's 0.250/0.194. Run 8 was being handed
-# its own velocity; this one has to infer it. A modest regression there is the
-# price of a policy that behaves the same on hardware as it does here — judge it
-# on check_base_lin_vel_stub.py agreement, not on beating Run 8's curves.
+# Watch, besides Episode_Metrics/{vel_error,upright}_stilts_{on,off}:
+#   * whether stilts-on upright holds up — the softest envs (10 Nm/rad) are the
+#     hardest; a stilts-on collapse with stilts-off fine means the range is too low.
+#   * ankle torque in sim_telemetry.py --stilts afterwards: if the pitch motors
+#     sit at the 50 Nm limit, the motors cannot replace the brace and it has to
+#     be stiffened on the hardware instead.
 export CUDA_VISIBLE_DEVICES=0
 uv run python scripts/train_stilt.py Mjlab-Velocity-Flat-Stilt-G1 \
     --env.scene.num-envs 4096 \
     --agent.max-iterations 6000 \
-    --agent.run-name run9-no-baselinvel \
+    --agent.run-name run10-soft-brace \
     --agent.logger wandb \
     --agent.wandb-project stilt-locomotion \
     --agent.upload-model False \

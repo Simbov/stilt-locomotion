@@ -2,10 +2,10 @@
 # Deployment config for the Stilt G1 velocity policy.
 #
 # GENERATED — do not hand-edit. Regenerate with:
-#   uv run python scripts/generate_deploy_config.py --run logs/rsl_rl/stilt_g1_velocity/2026-08-13_20-35-42_run8-stilts-on-off
+#   uv run python scripts/generate_deploy_config.py --run logs/rsl_rl/stilt_g1_velocity/2026-08-31_13-35-11_run9-no-baselinvel
 #
-# Source: 2026-08-13_20-35-42_run8-stilts-on-off
-# Policy: 495 inputs -> 29 actions
+# Source: 2026-08-31_13-35-11_run9-no-baselinvel
+# Policy: 480 inputs -> 29 actions
 #
 # ONE POLICY, TWO MORPHOLOGIES. This config is correct with the stilts bolted
 # on and with them removed. The policy is not told which — it infers it from
@@ -17,19 +17,18 @@
 # brace's stiffness and is counting on that authority.
 # ============================================================================
 #
-# OBSERVATION LAYOUT — 495 inputs. Read this carefully.
+# OBSERVATION LAYOUT — 480 inputs. Read this carefully.
 #
 # The vector is NOT 5 stacked frames of the full observation. Each term
 # contributes ALL 5 of its frames contiguously, oldest first, in this
 # order:
 #
-#   [0:15]      base_lin_vel         5 frames x 3
-#   [15:30]     base_ang_vel         5 frames x 3
-#   [30:45]     projected_gravity    5 frames x 3
-#   [45:190]    joint_pos_rel        5 frames x 29
-#   [190:335]   joint_vel_rel        5 frames x 29
-#   [335:480]   last_action          5 frames x 29
-#   [480:495]   velocity_commands    5 frames x 3
+#   [0:15]      base_ang_vel         5 frames x 3
+#   [15:30]     projected_gravity    5 frames x 3
+#   [30:175]    joint_pos_rel        5 frames x 29
+#   [175:320]   joint_vel_rel        5 frames x 29
+#   [320:465]   last_action          5 frames x 29
+#   [465:480]   velocity_commands    5 frames x 3
 #
 # Within each block index 0 is the OLDEST frame. Getting this wrong produces a
 # policy that loads, runs, and walks badly. Validate against reference_io.json
@@ -102,44 +101,37 @@ actions:
 # Observation normalisation is baked into the ONNX, so every scale is 1.0.
 # Do NOT add extra scaling here.
 observations:
-  # [0:15] — linear velocity in body frame. Requires the onboard estimator; if that
-  # term is unavailable, register a zero-fill stub (see README).
-  base_lin_vel:
-    params: {}
-    clip: null
-    scale: [1.0, 1.0, 1.0]
-    history_length: 5
-  # [15:30] — angular velocity from the IMU gyroscope.
+  # [0:15] — angular velocity from the IMU gyroscope.
   base_ang_vel:
     params: {}
     clip: null
     scale: [1.0, 1.0, 1.0]
     history_length: 5
-  # [30:45] — gravity projected into the body frame, from the IMU quaternion.
+  # [15:30] — gravity projected into the body frame, from the IMU quaternion.
   projected_gravity:
     params: {}
     clip: null
     scale: [1.0, 1.0, 1.0]
     history_length: 5
-  # [45:190] — encoder positions MINUS default_joint_pos.
+  # [30:175] — encoder positions MINUS default_joint_pos.
   joint_pos_rel:
     params: {}
     clip: null
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
-  # [190:335] — encoder velocities.
+  # [175:320] — encoder velocities.
   joint_vel_rel:
     params: {}
     clip: null
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
-  # [335:480] — previous raw policy output, before scale/offset.
+  # [320:465] — previous raw policy output, before scale/offset.
   last_action:
     params: {}
     clip: null
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
-  # [480:495] — joystick twist [vx, vy, yaw].
+  # [465:480] — joystick twist [vx, vy, yaw].
   velocity_commands:
     params: {command_name: base_velocity}
     clip: null

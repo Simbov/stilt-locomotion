@@ -235,9 +235,13 @@ def stilt_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={
       "asset_cfg": SceneEntityCfg("robot"),
       "fitted_probability": 0.5,
-      # A bolted clamp onto a rigid shank is close to rigid. The real value is
-      # unmeasured, so randomise wide and make the policy cope with all of it.
-      "brace_stiffness_range": (150.0, 2000.0),
+      # Run 10: 10-500, was 150-2000. On hardware (2026-09-17, 09-25) the brace
+      # added only ~0-35 Nm/rad on top of the motor's own 28.5 Nm/rad PD, so a
+      # Run 9 policy trained against a near-rigid brace pushed the ankle to its
+      # limit and the real clamp let it go there. The low end covers the brace
+      # as fitted; the top end covers it tightened. Unmeasured — re-centre on a
+      # bench measurement when there is one.
+      "brace_stiffness_range": (10.0, 500.0),
       "tip_site_rise": STILT_TIP_SITE_RISE,
     },
   )

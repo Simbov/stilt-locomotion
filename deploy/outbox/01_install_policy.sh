@@ -5,7 +5,15 @@ set -euo pipefail
 
 BUNDLE="$(cd "$(dirname "$0")" && pwd)"
 RL=~/unitree_rl_mjlab
-DEST="$RL/deploy/robots/g1/config/policy/velocity/stilt_run8"
+# Name the policy directory after the run that produced deploy.yaml, so the
+# robot always says which policy it is carrying. Hardcoding a name means a new
+# policy lands in a directory named after an old one.
+RUN_NAME="$(awk -F": " "/^# Source:/ {print \$2; exit}" "$BUNDLE/deploy.yaml")"
+if [ -z "$RUN_NAME" ]; then
+    echo "ABORT: no '# Source:' line in deploy.yaml — cannot name the policy dir." >&2
+    exit 1
+fi
+DEST="$RL/deploy/robots/g1/config/policy/velocity/$RUN_NAME"
 CFG="$RL/deploy/robots/g1/config/config.yaml"
 
 echo "== 1/4  checksums of the shipped files"
@@ -22,8 +30,10 @@ cp "$BUNDLE/deploy.yaml" "$DEST/params/deploy.yaml"
 md5sum "$DEST/exported/policy.onnx" "$DEST/params/deploy.yaml"
 
 echo "== 3/4  sanity-checking deploy.yaml against the runtime's expectations"
-python3 - "$DEST/params/deploy.yaml" <<'PY'
+EXPECT_DIM="$(awk -F": " "/^# input_dim:/ {print \$2; exit}" "$BUNDLE/MANIFEST.txt")"
+python3 - "$DEST/params/deploy.yaml" "${EXPECT_DIM:-0}" <<'PY'
 import sys
+expect = int(sys.argv[2])
 try:
     import yaml
 except ImportError:
@@ -40,22 +50,25 @@ for name, t in obs.items():
     if "params" not in t:
         fail.append(f"{name}: no params key — the block would parse as GROUPS and throw")
 dim = sum(len(t["scale"]) * t["history_length"] for t in obs.values())
-if dim != 495:
-    fail.append(f"observation dims come to {dim}, policy takes 495")
+if expect and dim != expect:
+    fail.append(f"observation dims come to {dim}, but the policy takes {expect}")
+elif not expect:
+    print("  WARN: manifest carried no input_dim; dimension check skipped")
 for f in fail:
     print("  FAIL:", f)
 if fail:
     sys.exit(1)
-print(f"  ok: {len(obs)} terms, {dim} dims, commands keyed base_velocity")
+print(f"  ok: {len(obs)} terms, {dim} dims (matches the policy), "
+      "commands keyed base_velocity")
 PY
 
-echo "== 4/4  pointing the Velocity FSM at stilt_run8"
-python3 - "$CFG" <<'PY'
+echo "== 4/4  pointing the Velocity FSM at $RUN_NAME"
+python3 - "$CFG" "$RUN_NAME" <<'PY'
 import re, sys
-p = sys.argv[1]
+p, run = sys.argv[1], sys.argv[2]
 s = open(p).read()
 new, n = re.subn(r'policy_dir: config/policy/velocity(/\S+)?',
-                 'policy_dir: config/policy/velocity/stilt_run8', s, count=1)
+                 f'policy_dir: config/policy/velocity/{run}', s, count=1)
 if n == 0:
     print("  FAIL: no Velocity policy_dir line found in config.yaml"); sys.exit(1)
 open(p, 'w').write(new)
@@ -68,4 +81,4 @@ echo
 echo "DONE. Next:"
 echo "  cd $RL/deploy/robots/g1/build && cmake .. && make -j\$(nproc)"
 echo "  then: ./g1_ctrl -n eth0 2>&1 | tee ~/run8_\$(date +%s).log"
-echo "  Verify the startup banner says stilt_run8 BEFORE touching the joystick."
+echo "  Verify the startup banner says $RUN_NAME BEFORE touching the joystick."

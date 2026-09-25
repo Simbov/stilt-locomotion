@@ -131,6 +131,10 @@ def test_the_brace_spring_exists_only_when_the_stilts_do(env):
     "the ankle is sprung with no stilt bolted to it"
   )
   assert float(stiffness[fitted].min()) > 0.0, "the brace applies no stiffness"
+  # Run 10 range: the real brace measured ~0-35 Nm/rad on hardware, so training
+  # must reach down near it rather than start at a near-rigid 150.
+  assert float(stiffness[fitted].min()) >= 10.0
+  assert float(stiffness[fitted].max()) <= 500.0
 
 
 def test_both_contact_sets_can_actually_collide(env):

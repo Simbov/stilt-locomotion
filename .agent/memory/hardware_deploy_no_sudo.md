@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: e47aed7e-46a3-4be7-b3b4-d8ee09eda3d2
-  modified: 2026-08-31T01:46:18.315Z
+  modified: 2026-09-13T23:54:40.490Z
 ---
 
 The `deploy/README.md` "one-time setup" tells you to `sudo make install` a newer
@@ -40,6 +40,15 @@ Also true of that robot:
   (`The other process is using the lowcmd channel`) but upstream commented out
   the `exit(0)`, so it carries on with two controllers fighting. The absence of
   that log line is the clean go/no-go test.
+- **2026-09-14 revisit (Run 9, bare feet):** robot has **no tmux**. First launch
+  still showed `lowcmd critical` after the user's first remote sequence; redoing
+  `L2+B` (limp) then `L2+R2` cleared it. The user recalls an earlier session where
+  the remote alone did not work and `~/unitree_sdk2/build/bin/g1_loco_client
+  --network_interface=eth0 --damp` ("Damp() accepted") freed the channel — try
+  that first if `lowcmd critical` persists. For a cable-free test, launch with
+  `setsid -f bash -c 'sleep infinity | ./g1_ctrl -n eth0 > LOG 2>&1' </dev/null >/dev/null 2>&1`
+  — `sleep infinity` keeps the stdin-reading keyboard thread from busy-spinning;
+  a plain `... &` over ssh makes the ssh call hang. Control thread idles ~20% CPU.
 - Laptop needs a static `192.168.123.222/24` on the USB-Ethernet adapter; there
   is no DHCP on the robot's network.
 
